@@ -1,0 +1,37 @@
+// ======================
+// Stripe Customer Portal (Self-Serve Billing)
+// ======================
+app.post("/api/billing-portal", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+
+    if (
+      !sessionId ||
+      typeof sessionId !== "string" ||
+      !sessionId.startsWith("cs_")
+    ) {
+      return res.status(400).json({ error: "Missing/invalid sessionId" });
+    }
+
+    // Checkout Session holen -> enthält customer
+    const checkoutSession = await stripe.checkout.sessions.retrieve(sessionId);
+
+    const customer = checkoutSession.customer;
+    if (!customer) {
+      return res.status(400).json({ error: "No customer found on session" });
+    }
+
+    // Portal Session erzeugen
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: customer.toString(),
+      return_url: `${FRONTEND_URL}/checkout-success?from=portal`,
+    });
+
+    return res.json({ url: portalSession.url });
+  } catch (err) {
+    console.error("billing-portal error:", err?.message || err);
+    return res
+      .status(500)
+      .json({ error: "Failed to create billing portal session" });
+  }
+});
