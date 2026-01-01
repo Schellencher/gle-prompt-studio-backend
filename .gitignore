@@ -6,5 +6,7 @@ node_modules/
 
 # optional (falls du lokale JSON-DB nutzt)
 *.json
+!package.json
+!package-lock.json
 data/
 db/
