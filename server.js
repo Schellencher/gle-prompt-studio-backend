@@ -1,18 +1,20 @@
-// backend/server.js — GLE Prompt Studio Backend (COMPLETE, COPY/PASTE)
-// Stripe Checkout + Webhook (raw safe) + JSON DB (Plan/Usage) + BYOK/PRO/BOOST generate
+// backend/server.js — GLE Prompt Studio Backend (CLEAN, Render-safe)
+// - Single CORS setup (no duplicate declarations)
+// - Stripe Checkout (subscription) + Billing Portal
+// - Stripe Webhook (raw safe) + idempotency
+// - JSON DB: plan + usage
 // Headers:
-//   x-gle-user  = usage identity
-//   x-gle-acc   = stable account identity (Stripe mapping)
-//   x-openai-key = BYOK key (optional)
+//   x-gle-user  (required) = usage identity
+//   x-gle-acc   (optional) = stable account identity (Stripe mapping)
+//   x-openai-key (optional) = BYOK key
 
 require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch"); // npm i node-fetch@2
+const Stripe = require("stripe");
 const fs = require("fs");
 const path = require("path");
-const Stripe = require("stripe");
 
 const app = express();
 
@@ -25,7 +27,7 @@ const HOST = String(process.env.HOST || "0.0.0.0").trim();
 const FRONTEND_URL = String(
   process.env.FRONTEND_URL || "http://localhost:3001"
 ).trim();
-
+// comma-list allowed: "http://localhost:3001,http://127.0.0.1:3001"
 const CORS_ORIGIN = String(process.env.CORS_ORIGIN || FRONTEND_URL).trim();
 
 const BYOK_ONLY =
@@ -46,82 +48,11 @@ const LIMITS = {
   pro: Number(process.env.LIMIT_PRO || 250),
 };
 
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  next();
-});
+const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN || "dev-admin").trim();
 
-// CORS (muss VOR den Routes stehen)
-const corsOptions = {
-  origin: function (origin, cb) {
-    // erlaubt Calls ohne Origin (curl, server-to-server)
-    if (!origin) return cb(null, true);
-
-    const allowed = [
-      "http://localhost:3001",
-      process.env.FRONTEND_URL,
-      process.env.CORS_ORIGIN,
-    ].filter(Boolean);
-
-    if (allowed.includes(origin)) return cb(null, true);
-    return cb(new Error("CORS blocked: " + origin));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "x-gle-acc",
-    "x-gle-user",
-    "x-account-id",
-    "x-admin-token",
-  ],
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
-
-const cors = require("cors");
-
-app.use(
-  cors({
-    origin: true, // spiegelt den Origin zurück (localhost + später Vercel/Domain)
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "x-gle-acc",
-      "x-gle-user",
-    ],
-  })
-);
-
-// Preflight für alle Endpunkte sauber beantworten
-app.options("*", cors({ origin: true, credentials: true }));
-
-// Preflight überall erlauben
-app.options("*", cors());
-
-// CORS (muss VOR den Routes stehen)
-app.use(
-  cors({
-    origin: (origin, cb) => cb(null, origin || true),
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "x-gle-acc",
-      "x-gle-user",
-      "x-account-id",
-      "x-admin-token",
-    ],
-  })
-);
-app.options("*", cors());
-
+// ======================
 // Stripe
+// ======================
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
 const STRIPE_PRICE_ID = String(process.env.STRIPE_PRICE_ID || "").trim();
 const STRIPE_WEBHOOK_SECRET = String(
@@ -129,421 +60,318 @@ const STRIPE_WEBHOOK_SECRET = String(
 ).trim();
 
 const stripe = STRIPE_SECRET_KEY
-  ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" })
+  ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" })
   : null;
 
-// Optional Admin token for linking existing subs without new checkout
-const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN || "").trim();
-
 // ======================
-// CORS
+// CORS (single source of truth)
 // ======================
-app.use(
-  cors({
-    origin: function (origin, cb) {
-      // allow server-to-server, same-origin, and dev tools without Origin header
-      if (!origin) return cb(null, true);
-      if (CORS_ORIGIN === "*" || origin === CORS_ORIGIN) return cb(null, true);
-      // allow localhost variants if CORS_ORIGIN is localhost
-      if (
-        CORS_ORIGIN.includes("localhost") &&
-        (origin.includes("localhost") || origin.includes("127.0.0.1"))
-      ) {
-        return cb(null, true);
-      }
-      return cb(null, true); // keep permissive for dev
-    },
-    credentials: true,
-  })
+const allowedOrigins = Array.from(
+  new Set(
+    CORS_ORIGIN.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .concat([
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+      ])
+  )
 );
 
+const corsOptions = {
+  origin: (origin, cb) => {
+    // allow curl/postman/stripe (no Origin header)
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error("CORS blocked: " + origin));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "x-gle-user",
+    "x-gle-acc",
+    "x-openai-key",
+    "x-admin-token",
+    "stripe-signature",
+  ],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+
+// simple request log
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 // ======================
-// DB (JSON)
+// JSON DB (DEV)
 // ======================
 const DB_FILE = path.join(__dirname, "gle_users.json");
-
-function readDB() {
-  try {
-    if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify({ users: {} }, null, 2), "utf8");
-    }
-    const raw = fs.readFileSync(DB_FILE, "utf8");
-    const data = JSON.parse(raw || "{}");
-    if (!data.users) data.users = {};
-    return data;
-  } catch {
-    return { users: {} };
-  }
-}
-
-function writeDB(db) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
-  } catch (e) {
-    console.error("DB write failed:", e?.message || e);
-  }
-}
 
 function nextMonthFirstDayMs() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
 }
 
+function readDB() {
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      const init = { users: {}, processedEvents: {}, payments: [] };
+      fs.writeFileSync(DB_FILE, JSON.stringify(init, null, 2), "utf-8");
+      return init;
+    }
+    const raw = fs.readFileSync(DB_FILE, "utf-8");
+    const db = JSON.parse(raw || "{}");
+    if (!db.users || typeof db.users !== "object") db.users = {};
+    if (!db.processedEvents || typeof db.processedEvents !== "object")
+      db.processedEvents = {};
+    if (!Array.isArray(db.payments)) db.payments = [];
+    return db;
+  } catch (e) {
+    return { users: {}, processedEvents: {}, payments: [] };
+  }
+}
+
+function writeDB(db) {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
+  } catch (e) {
+    console.error("DB write failed:", e?.message || e);
+  }
+}
+
+function getHeader(req, name) {
+  return String(req.headers[name] || "").trim();
+}
+
 function getUserId(req) {
-  return String(req.headers["x-gle-user"] || "").trim();
+  return getHeader(req, "x-gle-user");
 }
 
 function getAccountId(req) {
-  // you wanted x-gle-acc (clear meaning)
-  return String(req.headers["x-gle-acc"] || "").trim();
+  return getHeader(req, "x-gle-acc");
 }
 
 function identityKey(req) {
+  // prefer stable account id if present
   return getAccountId(req) || getUserId(req);
 }
 
 function ensureUser(db, key) {
   if (!db.users[key]) {
     db.users[key] = {
-      plan: "FREE",
-      usage: { used: 0, renewAt: nextMonthFirstDayMs() },
-      stripeCustomerId: "",
-      stripeSubId: "",
+      plan: "FREE", // FREE | PRO
+      usage: { used: 0, renewAt: nextMonthFirstDayMs(), tokens: 0, lastTs: 0 },
+      stripe: {
+        customerId: null,
+        subscriptionId: null,
+        status: null,
+        email: null,
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
   }
-  // auto reset monthly
   const u = db.users[key];
-  const renewAt = Number(u?.usage?.renewAt || nextMonthFirstDayMs());
-  if (Date.now() >= renewAt) {
-    u.usage = { used: 0, renewAt: nextMonthFirstDayMs() };
-    u.updatedAt = Date.now();
+  if (!u.usage)
+    u.usage = { used: 0, renewAt: nextMonthFirstDayMs(), tokens: 0, lastTs: 0 };
+  if (Date.now() >= Number(u.usage.renewAt || 0)) {
+    u.usage.used = 0;
+    u.usage.renewAt = nextMonthFirstDayMs();
   }
-  return db.users[key];
-}
-
-function setPlanPro(key, fields = {}) {
-  const db = readDB();
-  const u = ensureUser(db, key);
-  u.plan = "PRO";
   u.updatedAt = Date.now();
-  if (fields.stripeCustomerId)
-    u.stripeCustomerId = String(fields.stripeCustomerId);
-  if (fields.stripeSubId) u.stripeSubId = String(fields.stripeSubId);
-  writeDB(db);
   return u;
 }
 
-function setPlanFree(key) {
-  const db = readDB();
-  const u = ensureUser(db, key);
-  u.plan = "FREE";
-  u.updatedAt = Date.now();
-  writeDB(db);
-  return u;
+function wasEventProcessed(db, eventId) {
+  return Boolean(db.processedEvents?.[eventId]);
+}
+function markEventProcessed(db, eventId) {
+  db.processedEvents[eventId] = Date.now();
 }
 
-function findKeyBySubId(subId) {
-  const db = readDB();
-  const keys = Object.keys(db.users || {});
-  for (const k of keys) {
-    if (String(db.users[k]?.stripeSubId || "") === String(subId || ""))
-      return k;
-  }
-  return null;
+function addPayment(db, p) {
+  db.payments.push(p);
+  if (db.payments.length > 20000) db.payments = db.payments.slice(-10000);
 }
 
-// ======================
-// OpenAI (Responses API)
-// ======================
-function extractResponseText(json) {
-  if (!json) return "";
-  if (typeof json.output_text === "string") return json.output_text.trim();
-
-  // fallback: output array
-  try {
-    const out = json.output || [];
-    for (const item of out) {
-      const content = item?.content || [];
-      for (const c of content) {
-        if (c?.type === "output_text" && typeof c?.text === "string") {
-          return c.text.trim();
-        }
-        if (typeof c?.text === "string") return c.text.trim();
-      }
+function findKeyByStripe(db, { subscriptionId, customerId }) {
+  const users = db.users || {};
+  for (const [key, u] of Object.entries(users)) {
+    if (
+      (subscriptionId && u?.stripe?.subscriptionId === subscriptionId) ||
+      (customerId && u?.stripe?.customerId === customerId)
+    ) {
+      return key;
     }
-  } catch {}
-
-  // last resort
-  return String(json.text || json.result || "").trim();
-}
-
-async function callOpenAI({ apiKey, model, input }) {
-  const res = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input,
-      // IMPORTANT: do NOT set temperature here (you had model errors before)
-    }),
-  });
-
-  const requestId = res.headers.get("x-request-id") || "";
-  const json = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    const msg =
-      json?.error?.message ||
-      json?.message ||
-      json?.error ||
-      `OpenAI error (${res.status})`;
-    const err = new Error(msg);
-    err.status = res.status;
-    err.requestId = requestId;
-    throw err;
   }
-
-  return {
-    text: extractResponseText(json),
-    usage: json?.usage || null,
-    requestId,
-    raw: json,
-  };
+  return "";
 }
 
 // ======================
-// Health
-// ======================
-app.get("/api/health", (req, res) => {
-  return res.json({
-    status: "ok",
-    service: "GLE Prompt Studio Backend",
-    stripe: Boolean(stripe && STRIPE_PRICE_ID),
-    byokOnly: BYOK_ONLY,
-    models: MODELS,
-    limits: LIMITS,
-    ts: Date.now(),
-  });
-});
-
-// ======================
-// Stripe Webhook (RAW SAFE)
+// Stripe Webhook (RAW SAFE) — must be BEFORE express.json()
 // ======================
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
-    if (!stripe) return res.status(500).send("Stripe not configured");
-    if (!STRIPE_WEBHOOK_SECRET)
-      return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET");
-
-    let event;
     try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        req.headers["stripe-signature"],
-        STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      console.error("Webhook signature failed:", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+      if (!stripe) return res.status(500).send("Stripe not configured");
+      if (!STRIPE_WEBHOOK_SECRET)
+        return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET");
 
-    try {
-      // ✅ Subscription created via Checkout
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
+      const sig = req.headers["stripe-signature"];
+      let event;
 
-        const accountId =
-          session.client_reference_id ||
-          (session.metadata && session.metadata.accountId) ||
-          null;
-
-        if (!accountId) {
-          console.error(
-            "NO accountId on session => cannot activate PRO",
-            session.id
-          );
-          return res.json({ received: true });
-        }
-
-        const subId = session.subscription ? String(session.subscription) : "";
-        const customerId = session.customer ? String(session.customer) : "";
-
-        setPlanPro(String(accountId), {
-          stripeCustomerId: customerId,
-          stripeSubId: subId,
-        });
-
-        console.log(
-          "✅ PRO activated for x-gle-acc:",
-          accountId,
-          "sub:",
-          subId
+      try {
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          sig,
+          STRIPE_WEBHOOK_SECRET
         );
+      } catch (err) {
+        return res.status(400).send(`Webhook Error: ${err.message}`);
       }
 
-      // ✅ Subscription cancelled
-      if (event.type === "customer.subscription.deleted") {
-        const sub = event.data.object;
-        const subId = String(sub.id || "");
+      const db = readDB();
+      if (wasEventProcessed(db, event.id))
+        return res.json({ received: true, deduped: true });
 
-        const accountId =
-          (sub.metadata && sub.metadata.accountId) ||
-          sub.items?.data?.[0]?.metadata?.accountId ||
-          findKeyBySubId(subId);
+      const type = event.type;
+
+      // ✅ Checkout completed -> activate PRO
+      if (type === "checkout.session.completed") {
+        const session = event.data.object;
+        const accountId = String(
+          session?.metadata?.accountId || session?.client_reference_id || ""
+        ).trim();
+        const customerId = session?.customer ? String(session.customer) : "";
+        const subscriptionId = session?.subscription
+          ? String(session.subscription)
+          : "";
+        const email =
+          session?.customer_details?.email || session?.customer_email || null;
 
         if (accountId) {
-          setPlanFree(String(accountId));
-          console.log(
-            "🟡 PRO removed for x-gle-acc:",
-            accountId,
-            "sub:",
-            subId
-          );
-        } else {
-          console.log("subscription.deleted but no accountId mapping:", subId);
+          const u = ensureUser(db, accountId);
+          u.plan = "PRO";
+          u.stripe.customerId = customerId || u.stripe.customerId;
+          u.stripe.subscriptionId = subscriptionId || u.stripe.subscriptionId;
+          u.stripe.status = "active";
+          u.stripe.email = email || u.stripe.email;
+        }
+
+        addPayment(db, {
+          ts: Date.now(),
+          type,
+          accountId,
+          customerId,
+          subscriptionId,
+          sessionId: session?.id || null,
+        });
+      }
+
+      // ✅ recurring payment ok -> keep PRO
+      if (type === "invoice.payment_succeeded") {
+        const inv = event.data.object;
+        const customerId = inv?.customer ? String(inv.customer) : "";
+        const subscriptionId = inv?.subscription
+          ? String(inv.subscription)
+          : "";
+        const key = findKeyByStripe(db, { subscriptionId, customerId });
+        if (key) {
+          const u = ensureUser(db, key);
+          u.plan = "PRO";
+          u.stripe.customerId = customerId || u.stripe.customerId;
+          u.stripe.subscriptionId = subscriptionId || u.stripe.subscriptionId;
+          u.stripe.status = "active";
+        }
+        addPayment(db, {
+          ts: Date.now(),
+          type,
+          customerId,
+          subscriptionId,
+          invoiceId: inv?.id || null,
+        });
+      }
+
+      // ✅ subscription updated -> reflect status
+      if (type === "customer.subscription.updated") {
+        const sub = event.data.object;
+        const customerId = sub?.customer ? String(sub.customer) : "";
+        const subscriptionId = sub?.id ? String(sub.id) : "";
+        const status = String(sub?.status || "").toLowerCase(); // active|trialing|past_due|canceled...
+        const key = findKeyByStripe(db, { subscriptionId, customerId });
+        if (key) {
+          const u = ensureUser(db, key);
+          const isActive =
+            status === "active" ||
+            status === "trialing" ||
+            status === "past_due";
+          u.plan = isActive ? "PRO" : "FREE";
+          u.stripe.status = status || u.stripe.status;
         }
       }
 
+      // ✅ subscription canceled -> FREE
+      if (type === "customer.subscription.deleted") {
+        const sub = event.data.object;
+        const customerId = sub?.customer ? String(sub.customer) : "";
+        const subscriptionId = sub?.id ? String(sub.id) : "";
+        const key = findKeyByStripe(db, { subscriptionId, customerId });
+        if (key) {
+          const u = ensureUser(db, key);
+          u.plan = "FREE";
+          u.stripe.status = "canceled";
+        }
+      }
+
+      markEventProcessed(db, event.id);
+      writeDB(db);
       return res.json({ received: true });
     } catch (e) {
-      console.error("webhook handler error:", e?.message || e);
+      console.error("webhook error:", e?.message || e);
       return res.status(500).send("Webhook handler failed");
     }
   }
 );
 
 // ======================
-// Checkout: create session (POST JSON)
+// JSON parser for all other routes
 // ======================
-app.post("/api/create-checkout-session", express.json(), async (req, res) => {
-  try {
-    if (!stripe)
-      return res.status(500).json({ error: "Stripe not configured" });
-    if (!STRIPE_PRICE_ID)
-      return res.status(500).json({ error: "Missing STRIPE_PRICE_ID" });
+app.use(express.json({ limit: "1mb" }));
 
-    const userId = getUserId(req);
-    if (!userId) return res.status(400).json({ error: "Missing x-gle-user" });
-
-    const accFromHeader = getAccountId(req);
-    const accFromBody = String(req.body?.accountId || "").trim();
-    const accountId = accFromBody || accFromHeader || userId;
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-
-      // ✅ mapping App <-> Stripe
-      client_reference_id: accountId,
-      metadata: { accountId, app: "gle" },
-      subscription_data: { metadata: { accountId, app: "gle" } },
-
-      allow_promotion_codes: true,
-
-      success_url: `${FRONTEND_URL}/?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${FRONTEND_URL}/`,
-    });
-
-    return res.json({ url: session.url });
-  } catch (e) {
-    console.error("create-checkout-session error:", e?.message || e);
-    return res.status(500).json({ error: "checkout_failed" });
-  }
+// ======================
+// Health
+// ======================
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    service: "GLE Prompt Studio Backend",
+    stripe: Boolean(stripe && STRIPE_PRICE_ID),
+    byokOnly: BYOK_ONLY,
+    models: MODELS,
+    limits: LIMITS,
+    allowedOrigins,
+    ts: Date.now(),
+  });
 });
 
 // ======================
-// Billing Portal (POST JSON)
-// ======================
-app.post("/api/billing-portal", express.json(), async (req, res) => {
-  try {
-    if (!stripe)
-      return res.status(500).json({ error: "Stripe not configured" });
-
-    const sessionId = String(req.body?.sessionId || "").trim();
-    if (!sessionId.startsWith("cs_")) {
-      return res.status(400).json({ error: "Missing/invalid sessionId" });
-    }
-
-    const checkoutSession = await stripe.checkout.sessions.retrieve(sessionId);
-    const customer = checkoutSession.customer;
-    if (!customer)
-      return res.status(400).json({ error: "No customer on session" });
-
-    const portalSession = await stripe.billingPortal.sessions.create({
-      customer: customer.toString(),
-      return_url: `${FRONTEND_URL}/?from=portal`,
-    });
-
-    return res.json({ url: portalSession.url });
-  } catch (err) {
-    console.error("billing-portal error:", err?.message || err);
-    return res
-      .status(500)
-      .json({ error: "Failed to create billing portal session" });
-  }
-});
-
-// ======================
-// OPTIONAL: Link an existing Stripe subscription to x-gle-acc
-// (NO new checkout, NO new subscription)
-// ======================
-app.post("/api/admin/link-subscription", express.json(), async (req, res) => {
-  try {
-    if (!stripe)
-      return res.status(500).json({ error: "Stripe not configured" });
-    if (!ADMIN_TOKEN)
-      return res.status(403).json({ error: "ADMIN_TOKEN not set" });
-
-    const token = String(req.headers["x-admin-token"] || "").trim();
-    if (token !== ADMIN_TOKEN)
-      return res.status(403).json({ error: "forbidden" });
-
-    const accountId = String(
-      req.body?.accountId || getAccountId(req) || ""
-    ).trim();
-    const subscriptionId = String(req.body?.subscriptionId || "").trim();
-
-    if (!accountId) return res.status(400).json({ error: "missing accountId" });
-    if (!subscriptionId.startsWith("sub_"))
-      return res.status(400).json({ error: "missing/invalid subscriptionId" });
-
-    const sub = await stripe.subscriptions.retrieve(subscriptionId);
-    if (
-      !sub ||
-      !["active", "trialing", "past_due"].includes(String(sub.status || ""))
-    ) {
-      return res.status(400).json({ error: "subscription not active" });
-    }
-
-    setPlanPro(accountId, {
-      stripeCustomerId: String(sub.customer || ""),
-      stripeSubId: subscriptionId,
-    });
-
-    return res.json({ ok: true, linked: true, accountId, subscriptionId });
-  } catch (e) {
-    console.error("link-subscription error:", e?.message || e);
-    return res.status(500).json({ error: "link_failed" });
-  }
-});
-
-// ======================
-// /api/me — plan + usage (GET)
+// Me (plan + usage)
 // ======================
 app.get("/api/me", (req, res) => {
   const userId = getUserId(req);
   if (!userId)
     return res.status(400).json({ ok: false, error: "Missing x-gle-user" });
 
-  const key = identityKey(req) || userId;
-
+  const key = identityKey(req);
   const db = readDB();
   const u = ensureUser(db, key);
   writeDB(db);
@@ -551,171 +379,361 @@ app.get("/api/me", (req, res) => {
   return res.json({
     ok: true,
     key,
-    plan: u.plan === "PRO" ? "PRO" : "FREE",
-    usage: u.usage || { used: 0, renewAt: nextMonthFirstDayMs() },
+    plan: u.plan,
+    usage: u.usage,
+    stripe: { status: u?.stripe?.status || null },
     byokOnly: BYOK_ONLY,
     limits: LIMITS,
+    ts: Date.now(),
   });
 });
 
 // ======================
-// /api/test — validate BYOK key (GET)
+// Checkout: create session (subscription)
 // ======================
-app.get("/api/test", async (req, res) => {
-  const apiKey = String(req.headers["x-openai-key"] || "").trim();
-  if (!apiKey)
-    return res.status(400).json({ ok: false, error: "Missing x-openai-key" });
-
+app.post("/api/create-checkout-session", async (req, res) => {
   try {
-    const r = await callOpenAI({
-      apiKey,
-      model: MODELS.byok,
-      input: "Reply with exactly: OK",
+    const userId = getUserId(req);
+    if (!userId) return res.status(400).json({ error: "Missing x-gle-user" });
+
+    const accountId = identityKey(req);
+    if (!stripe)
+      return res.status(500).json({ error: "Stripe not configured" });
+    if (!STRIPE_PRICE_ID)
+      return res.status(500).json({ error: "Missing STRIPE_PRICE_ID" });
+
+    const db = readDB();
+    ensureUser(db, accountId);
+    writeDB(db);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      allow_promotion_codes: true,
+
+      // mapping
+      client_reference_id: accountId,
+      metadata: { accountId, userId, app: "gle" },
+      subscription_data: { metadata: { accountId, app: "gle" } },
+
+      success_url: `${FRONTEND_URL}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${FRONTEND_URL}/`,
     });
 
-    const text = (r.text || "").trim();
-    if (!text) return res.status(400).json({ ok: false, error: "No output" });
-
-    return res.json({ ok: true, text });
+    return res.json({ url: session.url, id: session.id });
   } catch (e) {
-    return res
-      .status(401)
-      .json({ ok: false, error: e?.message || "Key invalid" });
+    console.error("create-checkout-session error:", e?.message || e);
+    return res.status(500).json({ error: e?.message || "checkout_failed" });
   }
 });
 
 // ======================
-// /api/generate — main (POST JSON)
+// Billing Portal (Self-Serve)
+// body: { sessionId: "cs_..." }
 // ======================
-app.post("/api/generate", express.json(), async (req, res) => {
-  const userId = getUserId(req);
-  if (!userId) return res.status(400).json({ error: "Missing x-gle-user" });
+app.post("/api/billing-portal", async (req, res) => {
+  try {
+    if (!stripe)
+      return res.status(500).json({ error: "Stripe not configured" });
 
-  const key = identityKey(req) || userId;
-  const db = readDB();
-  const u = ensureUser(db, key);
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId.startsWith("cs_"))
+      return res.status(400).json({ error: "Missing/invalid sessionId" });
 
-  const byokKey = String(req.headers["x-openai-key"] || "").trim();
+    const checkoutSession = await stripe.checkout.sessions.retrieve(sessionId);
+    const customer = checkoutSession.customer;
+    if (!customer)
+      return res.status(400).json({ error: "No customer on checkout session" });
 
-  const useCase = String(req.body?.useCase || "").trim();
-  const tone = String(req.body?.tone || "").trim();
-  const language = String(req.body?.language || "").trim();
-  const topic = String(req.body?.topic || "").trim();
-  const extra = String(req.body?.extra || "").trim();
-  const boost = Boolean(req.body?.boost);
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: String(customer),
+      return_url: `${FRONTEND_URL}/`,
+    });
 
-  if (!topic) return res.status(400).json({ error: "Missing topic" });
-
-  // Decide if we may use server key
-  const plan = u.plan === "PRO" ? "PRO" : "FREE";
-  const wantsServer = !byokKey;
-
-  if (BYOK_ONLY && wantsServer) {
-    return res
-      .status(401)
-      .json({ error: "BYOK-only aktiv: Bitte OpenAI Key eintragen." });
+    return res.json({ url: portalSession.url });
+  } catch (e) {
+    console.error("billing-portal error:", e?.message || e);
+    return res.status(500).json({ error: "portal_failed" });
   }
+});
 
-  if (wantsServer) {
-    if (plan !== "PRO") {
-      return res.status(402).json({
-        error: "FREE: Bitte OpenAI Key eintragen ODER PRO aktivieren.",
-      });
+// ======================
+// Admin: link subscription manually (optional)
+// Header: x-admin-token: <ADMIN_TOKEN>
+// body: { accountId, subscriptionId }
+// ======================
+app.post("/api/admin/link-subscription", async (req, res) => {
+  try {
+    if (!stripe)
+      return res.status(500).json({ error: "Stripe not configured" });
+
+    const token = getHeader(req, "x-admin-token");
+    if (token !== ADMIN_TOKEN)
+      return res.status(403).json({ error: "forbidden" });
+
+    const accountId = String(req.body?.accountId || "").trim();
+    const subscriptionId = String(req.body?.subscriptionId || "").trim();
+    if (!accountId) return res.status(400).json({ error: "missing accountId" });
+    if (!subscriptionId.startsWith("sub_"))
+      return res.status(400).json({ error: "missing/invalid subscriptionId" });
+
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    const status = String(sub?.status || "").toLowerCase();
+    const okStatus = ["active", "trialing", "past_due"].includes(status);
+    if (!okStatus)
+      return res.status(400).json({ error: "subscription not active" });
+
+    const db = readDB();
+    const u = ensureUser(db, accountId);
+    u.plan = "PRO";
+    u.stripe.customerId = String(sub.customer || "");
+    u.stripe.subscriptionId = subscriptionId;
+    u.stripe.status = status;
+    writeDB(db);
+
+    return res.json({
+      ok: true,
+      linked: true,
+      accountId,
+      subscriptionId,
+      status,
+    });
+  } catch (e) {
+    console.error("link-subscription error:", e?.message || e);
+    return res.status(500).json({ error: "link_failed" });
+  }
+});
+
+// ======================
+// OpenAI (Responses API) — used by /api/generate and /api/test
+// ======================
+function extractResponseText(json) {
+  if (!json) return "";
+  if (typeof json.output_text === "string" && json.output_text.trim())
+    return json.output_text.trim();
+  try {
+    const out = Array.isArray(json.output) ? json.output : [];
+    for (const item of out) {
+      const content = Array.isArray(item?.content) ? item.content : [];
+      for (const c of content) {
+        if (
+          c?.type === "output_text" &&
+          typeof c?.text === "string" &&
+          c.text.trim()
+        )
+          return c.text.trim();
+        if (typeof c?.text === "string" && c.text.trim()) return c.text.trim();
+      }
     }
-    if (!SERVER_OPENAI_API_KEY) {
+  } catch {}
+  return "";
+}
+
+async function callOpenAI({
+  apiKey,
+  model,
+  systemText,
+  userText,
+  maxOutputTokens = 900,
+  timeoutMs = 60000,
+}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  const isGpt5 = /^gpt-5/i.test(model);
+  const body = {
+    model,
+    input: [
+      { role: "system", content: [{ type: "input_text", text: systemText }] },
+      { role: "user", content: [{ type: "input_text", text: userText }] },
+    ],
+    max_output_tokens: maxOutputTokens,
+  };
+
+  // only attach reasoning for gpt-5 models (safer)
+  if (isGpt5) body.reasoning = { effort: "minimal" };
+
+  try {
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    const reqId =
+      r.headers.get("openai-request-id") || r.headers.get("x-request-id") || "";
+    const json = await r.json().catch(() => ({}));
+
+    if (!r.ok) {
+      const msg =
+        json?.error?.message || json?.message || `OpenAI error (${r.status})`;
+      const err = new Error(msg);
+      err.status = r.status;
+      err.requestId = reqId;
+      throw err;
+    }
+
+    return {
+      text: extractResponseText(json),
+      usage: json?.usage || null,
+      requestId: reqId,
+    };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ======================
+// Test BYOK key
+// ======================
+app.get("/api/test", async (req, res) => {
+  try {
+    const key = getHeader(req, "x-openai-key");
+    if (!key)
+      return res.status(400).json({ ok: false, error: "Missing x-openai-key" });
+
+    const r = await callOpenAI({
+      apiKey: key,
+      model: MODELS.byok,
+      systemText: "Reply with exactly one word: OK",
+      userText: "OK",
+      maxOutputTokens: 16,
+      timeoutMs: 20000,
+    });
+
+    const out = String(r.text || "").trim();
+    if (!out)
+      return res.status(502).json({ ok: false, error: "No text from OpenAI" });
+
+    return res.json({ ok: true, text: out, requestId: r.requestId });
+  } catch (e) {
+    return res
+      .status(e?.status || 500)
+      .json({ ok: false, error: e?.message || "Key test failed" });
+  }
+});
+
+// ======================
+// Generate (Master Prompt)
+// ======================
+app.post("/api/generate", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(400).json({ error: "Missing x-gle-user" });
+
+    const key = identityKey(req);
+    const db = readDB();
+    const u = ensureUser(db, key);
+
+    const byokKey = getHeader(req, "x-openai-key");
+    const wantsServer = !byokKey;
+
+    if (BYOK_ONLY && wantsServer) {
+      return res
+        .status(402)
+        .json({ error: "BYOK-only aktiv: Bitte OpenAI Key eintragen." });
+    }
+
+    const plan = u.plan === "PRO" ? "PRO" : "FREE";
+    if (wantsServer && plan !== "PRO") {
+      return res
+        .status(402)
+        .json({
+          error: "FREE: Bitte OpenAI Key eintragen ODER PRO aktivieren.",
+        });
+    }
+    if (wantsServer && !SERVER_OPENAI_API_KEY) {
       return res.status(500).json({ error: "SERVER_OPENAI_API_KEY fehlt" });
     }
 
-    // quota for server credits
-    const used = Number(u?.usage?.used || 0);
-    const limit = LIMITS.pro;
-    if (used >= limit) {
-      return res.status(402).json({
-        error: `Limit erreicht (${used}/${limit}). Reset am ${new Date(
-          Number(u?.usage?.renewAt || nextMonthFirstDayMs())
-        ).toLocaleDateString("de-DE")}.`,
-      });
+    const useCase = String(req.body?.useCase || "").trim();
+    const tone = String(req.body?.tone || "").trim();
+    const language = String(req.body?.language || "").trim();
+    const topic = String(req.body?.topic || "").trim();
+    const extra = String(req.body?.extra || "").trim();
+    const boost = Boolean(req.body?.boost);
+
+    if (!topic) return res.status(400).json({ error: "Missing topic" });
+
+    // quota only for server usage
+    if (wantsServer) {
+      const used = Number(u?.usage?.used || 0);
+      const limit = LIMITS.pro;
+      if (used >= limit) {
+        return res.status(429).json({
+          error: `Limit erreicht (${used}/${limit}). Reset am ${new Date(
+            Number(u?.usage?.renewAt || nextMonthFirstDayMs())
+          ).toLocaleDateString("de-DE")}.`,
+        });
+      }
     }
-  }
 
-  const model = boost ? MODELS.boost : wantsServer ? MODELS.pro : MODELS.byok;
-  const apiKeyToUse = wantsServer ? SERVER_OPENAI_API_KEY : byokKey;
+    const model = boost ? MODELS.boost : wantsServer ? MODELS.pro : MODELS.byok;
+    const apiKeyToUse = wantsServer ? SERVER_OPENAI_API_KEY : byokKey;
 
-  // Prompt to generate a MASTER-PROMPT (not final content)
-  const lang = /englisch|english/i.test(language) ? "EN" : "DE";
-  const sys =
-    lang === "EN"
-      ? `You are "GLE Prompt Studio". Create a high-quality MASTER PROMPT that the user can paste into ChatGPT/Claude/etc. Output ONLY the master prompt text.`
-      : `Du bist "GLE Prompt Studio". Erstelle einen hochwertigen MASTER-PROMPT, den man direkt in ChatGPT/Claude/etc. einfügt. Gib NUR den Master-Prompt-Text aus.`;
+    const isEN = /english|englisch/i.test(language);
+    const systemText = isEN
+      ? `You are "GLE Prompt Studio". Create ONE high-quality MASTER PROMPT the user can paste into ChatGPT/Claude/etc. Output ONLY the master prompt text.`
+      : `Du bist "GLE Prompt Studio". Erstelle EINEN hochwertigen MASTER-PROMPT zum Copy/Paste in ChatGPT/Claude/etc. Gib NUR den Master-Prompt-Text aus.`;
 
-  const body =
-    lang === "EN"
-      ? `
-${sys}
-
-Use Case: ${useCase || "-"}
+    const userText = isEN
+      ? `Use Case: ${useCase || "-"}
 Tone: ${tone || "-"}
 Language: ${language || "English"}
 Topic/Context: ${topic}
 Extra: ${extra || "-"}
-
 Requirements:
 - Include role + goal + constraints + structure + style + length guidance.
-- Add a short "Questions to clarify" section (max 3) ONLY if information is missing.
-- Add an output format template matching the use case.
-- Make it copy/paste ready.
-`
-      : `
-${sys}
-
-Use Case: ${useCase || "-"}
+- Add max 3 clarifying questions ONLY if critical info is missing.
+- Provide an output format template matching the use case.
+- Copy/paste ready.`
+      : `Use Case: ${useCase || "-"}
 Ton: ${tone || "-"}
 Sprache: ${language || "Deutsch"}
 Thema/Kontext: ${topic}
 Zusatz: ${extra || "-"}
-
 Anforderungen:
 - Rolle + Ziel + Rahmenbedingungen + Struktur + Stil + Längenvorgabe.
 - Max. 3 Rückfragen NUR wenn wirklich Infos fehlen.
 - Output-Format-Vorlage passend zum Use Case.
-- Copy/Paste ready.
-`;
+- Copy/Paste ready.`;
 
-  try {
     const r = await callOpenAI({
       apiKey: apiKeyToUse,
       model,
-      input: body,
+      systemText,
+      userText,
+      maxOutputTokens: boost ? 1600 : 900,
+      timeoutMs: boost ? 90000 : 60000,
     });
 
-    const text = (r.text || "").trim();
-    if (!text)
-      return res.status(500).json({ error: "Keine Textausgabe erhalten." });
+    const out = String(r.text || "").trim();
+    if (!out)
+      return res.status(502).json({ error: "Keine Textausgabe erhalten." });
 
-    // increment server usage AFTER success
-    if (wantsServer && plan === "PRO" && !BYOK_ONLY) {
-      u.usage.used = Number(u?.usage?.used || 0) + 1;
-      u.updatedAt = Date.now();
-      db.users[key] = u;
+    // track server usage
+    if (wantsServer) {
+      u.usage.used = Number(u.usage.used || 0) + 1;
+      u.usage.lastTs = Date.now();
+      writeDB(db);
+    } else {
       writeDB(db);
     }
 
-    const tokens =
-      Number(r?.usage?.total_tokens || 0) ||
-      Number(r?.usage?.input_tokens || 0) +
-        Number(r?.usage?.output_tokens || 0) ||
-      0;
-
     return res.json({
       ok: true,
-      result: text,
+      result: out,
+      output: out,
       meta: {
         model,
-        tokens: tokens || undefined,
-        boost,
         plan,
         isBYOK: !wantsServer,
-        requestId: r.requestId || undefined,
+        boost,
+        requestId: r.requestId || "",
       },
     });
   } catch (e) {
@@ -729,15 +747,11 @@ Anforderungen:
 // ======================
 app.listen(PORT, HOST, () => {
   console.log(`✅ GLE Backend running on http://${HOST}:${PORT}`);
-  console.log(`   BYOK_ONLY=${BYOK_ONLY}`);
-  console.log(
-    `   Models: BYOK=${MODELS.byok} | PRO=${MODELS.pro} | BOOST=${MODELS.boost}`
-  );
-  console.log(`   Limits: FREE=${LIMITS.free} | PRO=${LIMITS.pro}`);
+  console.log(`   FRONTEND_URL=${FRONTEND_URL}`);
+  console.log(`   CORS_ORIGIN=${CORS_ORIGIN}`);
   console.log(
     `   Stripe=${Boolean(stripe && STRIPE_PRICE_ID)} Price=${
       STRIPE_PRICE_ID ? "set" : "missing"
     }`
   );
-  console.log(`   FRONTEND_URL=${FRONTEND_URL}`);
 });
