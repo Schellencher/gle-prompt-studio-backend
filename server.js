@@ -437,12 +437,10 @@ app.post("/api/generate", async (req, res) => {
 
     // BYOK-only mode
     if (BYOK_ONLY && !isBYOK) {
-      return res
-        .status(401)
-        .json({
-          error: "BYOK-only: Missing x-openai-key",
-          meta: { plan, isBYOK: false },
-        });
+      return res.status(401).json({
+        error: "BYOK-only: Missing x-openai-key",
+        meta: { plan, isBYOK: false },
+      });
     }
 
     // Choose which key/model to use
@@ -457,20 +455,16 @@ app.post("/api/generate", async (req, res) => {
     } else {
       // Server-credit call requires PRO + server key available
       if (plan !== "PRO") {
-        return res
-          .status(402)
-          .json({
-            error: "PRO required (no BYOK key provided).",
-            meta: { plan, isBYOK: false },
-          });
+        return res.status(402).json({
+          error: "PRO required (no BYOK key provided).",
+          meta: { plan, isBYOK: false },
+        });
       }
       if (!SERVER_OPENAI_API_KEY) {
-        return res
-          .status(500)
-          .json({
-            error: "Server OpenAI key missing (SERVER_OPENAI_API_KEY)",
-            meta: { plan, isBYOK: false },
-          });
+        return res.status(500).json({
+          error: "Server OpenAI key missing (SERVER_OPENAI_API_KEY)",
+          meta: { plan, isBYOK: false },
+        });
       }
       apiKey = SERVER_OPENAI_API_KEY;
       model = wantsBoost ? MODEL_BOOST : MODEL_PRO;
@@ -592,6 +586,130 @@ app.post("/api/create-checkout-session", async (req, res) => {
   } catch (e) {
     console.error("create-checkout-session error:", e?.message || e);
     return res.status(500).json({ error: e?.message || "checkout_failed" });
+  }
+});
+
+// ======================
+// Sync after Checkout Success
+// body: { sessionId: "cs_..." }
+// ======================
+app.post("/api/sync-checkout-session", async (req, res) => {
+  try {
+    if (!stripe)
+      return res.status(500).json({ error: "Stripe not configured" });
+
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId.startsWith("cs_")) {
+      return res.status(400).json({ error: "Missing/invalid sessionId" });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["subscription", "customer"],
+    });
+
+    const accountId = String(
+      session?.client_reference_id || session?.metadata?.accountId || ""
+    ).trim();
+
+    if (!accountId) {
+      return res.status(400).json({ error: "No accountId on session" });
+    }
+
+    const sub = session.subscription;
+    const subId =
+      typeof sub === "object" ? String(sub.id || "") : String(sub || "");
+    const status =
+      typeof sub === "object" ? String(sub.status || "").toLowerCase() : "";
+
+    const okStatus = ["active", "trialing", "past_due"].includes(status);
+    if (!okStatus) {
+      return res.status(400).json({
+        ok: false,
+        error: "subscription_not_active",
+        status,
+        subscriptionId: subId || null,
+      });
+    }
+
+    const db = readDB();
+    const u = ensureUser(db, accountId);
+
+    u.plan = "PRO";
+    u.stripe = u.stripe || {};
+    u.stripe.customerId = session.customer ? String(session.customer) : null;
+    u.stripe.subscriptionId = subId || null;
+    u.stripe.status = status || null;
+
+    writeDB(db);
+
+    return res.json({
+      ok: true,
+      accountId,
+      plan: u.plan,
+      status,
+      subscriptionId: subId,
+    });
+  } catch (e) {
+    console.error("sync-checkout-session error:", e?.message || e);
+    return res.status(500).json({ error: e?.message || "sync_failed" });
+  }
+});
+
+// ======================
+// Sync after Checkout Success (no webhook required)
+// body: { sessionId: "cs_..." }
+// ======================
+app.post("/api/sync-checkout-session", async (req, res) => {
+  try {
+    if (!stripe)
+      return res.status(500).json({ error: "Stripe not configured" });
+
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId.startsWith("cs_"))
+      return res.status(400).json({ error: "Missing/invalid sessionId" });
+
+    // Expand subscription to read status
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["subscription", "customer"],
+    });
+
+    const accountId = String(
+      session.client_reference_id || session.metadata?.accountId || ""
+    ).trim();
+
+    if (!accountId)
+      return res.status(400).json({ error: "Missing accountId on session" });
+
+    const sub = session.subscription;
+    const subId = typeof sub === "object" ? sub.id : String(sub || "");
+    const status =
+      typeof sub === "object" ? String(sub.status || "").toLowerCase() : "";
+
+    const okStatus = ["active", "trialing", "past_due"].includes(status);
+
+    // update DB
+    const db = readDB();
+    const u = ensureUser(db, accountId);
+
+    u.stripe = u.stripe || {};
+    u.stripe.customerId = session.customer ? String(session.customer) : null;
+    u.stripe.subscriptionId = subId || null;
+    u.stripe.status = status || null;
+
+    if (okStatus) u.plan = "PRO";
+
+    writeDB(db);
+
+    return res.json({
+      ok: true,
+      accountId,
+      plan: u.plan,
+      status,
+      subscriptionId: subId,
+    });
+  } catch (e) {
+    console.error("sync-checkout-session error:", e?.message || e);
+    return res.status(500).json({ error: e?.message || "sync_failed" });
   }
 });
 
