@@ -1,8 +1,8 @@
 /* server.js — GLE Prompt Studio Backend (FINAL, UNKAPUTTBAR)
-   - Checkout: NIEMALS 400 nur wegen fehlendem accountId Header (Fallback + Warn-Log)
-   - Logs: Request-Logs für Render Live Tail
-   - Health: buildTag sichtbar (sofort sehen ob Render wirklich den richtigen Stand hat)
-   - Stripe Checkout: "card" + "paypal" (PayPal bleibt), KEIN Amazon Pay
+   - Checkout: NIEMALS 400 nur wegen fehlendem accountId Header
+   - 500 eliminieren: CORS wirft nie Error + Stripe-Fehler -> 400 mit Details
+   - Health: buildTag + Stripe-Mode sichtbar
+   - Stripe Checkout: ["card","paypal"] (PayPal bleibt), KEIN Amazon Pay
 */
 
 require("dotenv").config();
@@ -22,9 +22,14 @@ const app = express();
 const PORT = Number(process.env.PORT || 3002);
 const HOST = String(process.env.HOST || "0.0.0.0").trim();
 
-const BUILD_TAG = String(process.env.BUILD_TAG || "").trim();
+// ✅ build marker (Render)
+const BUILD_TAG = String(
+  process.env.BUILD_TAG || process.env.RENDER_GIT_COMMIT || "local"
+).trim();
 
-const FRONTEND_URL = String(process.env.FRONTEND_URL || "http://localhost:3001").trim();
+const FRONTEND_URL = String(
+  process.env.FRONTEND_URL || "http://localhost:3001"
+).trim();
 
 const BYOK_ONLY =
   String(process.env.BYOK_ONLY || "false").toLowerCase() === "true";
@@ -44,7 +49,13 @@ const SERVER_OPENAI_API_KEY = String(process.env.SERVER_OPENAI_API_KEY || "").tr
 
 // Stripe
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
-const STRIPE_PRICE_ID_PRO = String(process.env.STRIPE_PRICE_ID_PRO || "").trim();
+
+// ✅ kompatibel: PRO-Price kann STRIPE_PRICE_ID_PRO ODER STRIPE_PRICE_ID heißen
+const STRIPE_PRICE_ID_PRO = String(
+  process.env.STRIPE_PRICE_ID_PRO || process.env.STRIPE_PRICE_ID || ""
+).trim();
+
+// Optional URLs
 const STRIPE_SUCCESS_URL = String(
   process.env.STRIPE_SUCCESS_URL ||
     `${FRONTEND_URL}/checkout-success?session_id={CHECKOUT_SESSION_ID}`
@@ -70,7 +81,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 
 const ALLOWED_ORIGINS = (() => {
-  const raw = String(process.env.ALLOWED_ORIGINS || "").trim();
+  const raw = String(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN || "").trim();
   if (!raw) return DEFAULT_ALLOWED_ORIGINS;
   return raw
     .split(",")
@@ -81,6 +92,14 @@ const ALLOWED_ORIGINS = (() => {
 // Stripe client
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
+const STRIPE_MODE = STRIPE_SECRET_KEY.startsWith("sk_live_")
+  ? "live"
+  : STRIPE_SECRET_KEY.startsWith("sk_test_")
+  ? "test"
+  : STRIPE_SECRET_KEY
+  ? "unknown"
+  : "missing";
+
 // ======================
 // Request logs (Render Live Tail)
 // ======================
@@ -89,23 +108,32 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const ms = Date.now() - t0;
     const origin = req.headers.origin || "";
-    console.log(
-      `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms) origin=${origin}`
-    );
+    const user = req.headers["x-gle-user"] || "-";
+    const acc = req.headers["x-gle-account-id"] || req.headers["x-gle-acc"] || "-";
+    if (
+      req.originalUrl.startsWith("/api/create-checkout-session") ||
+      req.originalUrl.startsWith("/api/me") ||
+      req.originalUrl.startsWith("/api/generate") ||
+      req.originalUrl.startsWith("/api/health")
+    ) {
+      console.log(
+        `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms) origin=${origin} user=${user} acc=${acc}`
+      );
+    }
   });
   next();
 });
 
 // ======================
-// CORS + Body
+// CORS + Body (CORS darf NIE 500 werfen)
 // ======================
 app.use(
   cors({
-    origin: function (origin, cb) {
+    origin: (origin, cb) => {
       // server-to-server / curl ohne Origin erlauben
       if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error("CORS not allowed: " + origin));
+      // ✅ niemals Error werfen -> kein 500
+      return cb(null, ALLOWED_ORIGINS.includes(origin));
     },
     credentials: true,
     allowedHeaders: [
@@ -113,18 +141,28 @@ app.use(
       "Authorization",
       "x-gle-user",
       "x-gle-account-id",
+      "x-gle-acc",
       "x-openai-key",
       "x-admin-token",
     ],
     methods: ["GET", "POST", "OPTIONS"],
+    optionsSuccessStatus: 204,
   })
 );
+
+// Preflight sauber
+app.options("*", cors());
 
 app.use(express.json({ limit: "1mb" }));
 
 // ======================
-// DB (simple JSON)
+// DB (simple JSON) + safe IO
 // ======================
+function ensureDirForFile(filePath) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+}
+
 let db = loadDb();
 
 function loadDb() {
@@ -144,6 +182,7 @@ function loadDb() {
 
 function saveDb() {
   try {
+    ensureDirForFile(DB_FILE);
     const tmp = DB_FILE + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf8");
     fs.renameSync(tmp, DB_FILE);
@@ -201,8 +240,18 @@ function getUserId(req) {
 }
 
 function getAccountId(req) {
-  // Header preferred, body fallback
-  return String(req.headers["x-gle-account-id"] || req.body?.accountId || "").trim();
+  return String(
+    req.headers["x-gle-account-id"] ||
+      req.headers["x-gle-acc"] ||
+      req.body?.accountId ||
+      req.body?.acc ||
+      ""
+  ).trim();
+}
+
+function fallbackAccountIdFromUser(userId) {
+  const safe = String(userId || "").replace(/[^a-zA-Z0-9]/g, "").slice(-24);
+  return `acc_${safe || Date.now()}`;
 }
 
 function getAdminToken(req) {
@@ -236,6 +285,21 @@ function extractOutputText(respJson) {
   }
 }
 
+function stripeErrorToJson(err) {
+  return {
+    error: "stripe_error",
+    message:
+      (err && err.raw && err.raw.message) ||
+      (err && err.message) ||
+      String(err),
+    type: err && err.type,
+    code: err && err.code,
+    param: err && err.param,
+    requestId: err && err.requestId,
+    raw: err && err.raw ? { type: err.raw.type, code: err.raw.code } : null,
+  };
+}
+
 // ======================
 // Routes
 // ======================
@@ -247,6 +311,8 @@ app.get("/api/health", (req, res) => {
     service: "GLE Prompt Studio Backend",
     buildTag: BUILD_TAG || null,
     stripe: Boolean(stripe) && Boolean(STRIPE_PRICE_ID_PRO),
+    stripeMode: STRIPE_MODE, // ✅ test/live sichtbar
+    stripePriceId: STRIPE_PRICE_ID_PRO || null,
     byokOnly: BYOK_ONLY,
     models: { byok: MODEL_BYOK, pro: MODEL_PRO, boost: MODEL_BOOST },
     limits: { free: FREE_LIMIT, pro: PRO_LIMIT },
@@ -326,7 +392,6 @@ app.post("/api/generate", async (req, res) => {
 
     const model = useBoost ? MODEL_BOOST : (plan === "PRO" ? MODEL_PRO : MODEL_BYOK);
 
-    // Responses API – ohne temperature (damit keine "unsupported value" Fehler kommen)
     const payload = {
       model,
       input,
@@ -377,22 +442,25 @@ app.post("/api/generate", async (req, res) => {
 // ----------------------
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
-    if (!stripe) return res.status(500).json({ error: "stripe_not_configured" });
-    if (!STRIPE_PRICE_ID_PRO) return res.status(500).json({ error: "stripe_price_missing" });
+    // ✅ diese Fälle sind CONFIG -> 400 (kein 500)
+    if (!stripe) {
+      return res.status(400).json({ error: "stripe_not_configured", hint: "STRIPE_SECRET_KEY missing" });
+    }
+    if (!STRIPE_PRICE_ID_PRO) {
+      return res.status(400).json({
+        error: "stripe_price_missing",
+        hint: "Set STRIPE_PRICE_ID_PRO (or STRIPE_PRICE_ID) in Render env",
+      });
+    }
 
     const userId = getUserId(req);
 
-    // ✅ accountId optional (kein 400 mehr)
+    // ✅ accountId optional
     let accountId = getAccountId(req);
-    if (!accountId) {
-      accountId = "unknown";
-      console.warn("⚠️ Missing x-gle-account-id -> using fallback 'unknown'");
-    }
+    if (!accountId) accountId = fallbackAccountIdFromUser(userId);
 
     ensureUser(userId);
 
-    // ✅ PayPal bleibt drin -> payment_method_types includes 'paypal'
-    // ✅ Amazon Pay ist raus, weil NICHT in payment_method_types
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: STRIPE_PRICE_ID_PRO, quantity: 1 }],
@@ -401,10 +469,11 @@ app.post("/api/create-checkout-session", async (req, res) => {
       success_url: STRIPE_SUCCESS_URL,
       cancel_url: STRIPE_CANCEL_URL,
 
-      // Keep short & safe
       client_reference_id: `${userId}:${accountId}`.slice(0, 200),
       metadata: { userId, accountId },
 
+      // ✅ PayPal bleibt, Amazon Pay raus
+      // (keine automatic_payment_methods!)
       payment_method_types: ["card", "paypal"],
     });
 
@@ -416,10 +485,15 @@ app.post("/api/create-checkout-session", async (req, res) => {
     };
     saveDb();
 
-    res.json({ url: session.url, id: session.id });
+    return res.json({ url: session.url, id: session.id, accountId });
   } catch (e) {
-    console.error("Stripe checkout error:", e);
-    res.status(500).json({ error: "stripe_checkout_error" });
+    console.error("Stripe checkout error FULL:", e);
+
+    // ✅ Stripe InvalidRequest etc. -> 400 mit echter Message (damit 500 weg ist)
+    const isStripe = e && (String(e.type || "").startsWith("Stripe") || e.raw);
+    const status = isStripe ? 400 : 500;
+
+    return res.status(status).json(stripeErrorToJson(e));
   }
 });
 
@@ -449,9 +523,10 @@ app.post("/api/dev/set-plan", (req, res) => {
 // ======================
 app.listen(PORT, HOST, () => {
   console.log(`✅ GLE Backend running on http://${HOST}:${PORT}`);
-  console.log(`   buildTag=${BUILD_TAG || "(none)"}`);
+  console.log(`   buildTag=${BUILD_TAG}`);
   console.log(`   BYOK_ONLY=${BYOK_ONLY}`);
-  console.log(`   Stripe=${Boolean(stripe)} Price=${STRIPE_PRICE_ID_PRO ? "set" : "missing"}`);
+  console.log(`   Stripe=${Boolean(stripe)} mode=${STRIPE_MODE} price=${STRIPE_PRICE_ID_PRO ? "set" : "missing"}`);
   console.log(`   FRONTEND_URL=${FRONTEND_URL}`);
   console.log(`   AllowedOrigins=${ALLOWED_ORIGINS.join(", ")}`);
+  console.log(`   DB_FILE=${DB_FILE}`);
 });
