@@ -762,17 +762,14 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      client_reference_id: acc.accountId,
+      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
       success_url: STRIPE_SUCCESS_URL,
       cancel_url: STRIPE_CANCEL_URL,
+
+      // optional, aber gut:
       allow_promotion_codes: true,
-      customer_email: customerEmail,
-      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-      metadata: { accountId: acc.accountId, userId: acc.userId },
-      subscription_data: {
-        metadata: { accountId: acc.accountId, userId: acc.userId },
-      },
-      automatic_payment_methods: { enabled: true },
+      client_reference_id: accountId,
+      metadata: { accountId, userId },
     });
 
     db.checkouts[session.id] = {
@@ -800,81 +797,93 @@ app.post("/api/sync-checkout-session", async (req, res) => {
         .status(500)
         .json({ ok: false, error: "stripe_not_configured" });
 
+    const accountId =
+      normalizeHeader(req, "x-gle-account-id") ||
+      String(req.body?.accountId || "").trim();
+
+    const userId =
+      normalizeHeader(req, "x-gle-user") ||
+      String(req.body?.userId || "anon").trim();
+
     const sessionId = String(
-      req.body?.session_id || req.body?.sessionId || ""
+      req.body?.sessionId || req.body?.session_id || req.query?.session_id || ""
     ).trim();
-    if (!sessionId)
-      return res.status(400).json({ ok: false, error: "missing_session_id" });
-
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ["subscription", "customer"],
-    });
-
-    const meta = session?.metadata || {};
-    const mapped = db.checkouts?.[sessionId] || null;
-
-    const accountId = String(
-      meta.accountId || session.client_reference_id || mapped?.accountId || ""
-    ).trim();
-    const userId = String(meta.userId || mapped?.userId || "anon").trim();
 
     if (!accountId)
-      return res.status(400).json({ ok: false, error: "missing_account_id" });
+      return res.status(400).json({ ok: false, error: "missing_accountId" });
+    if (!sessionId)
+      return res.status(400).json({ ok: false, error: "missing_sessionId" });
 
     const acc = getOrCreateAccount(accountId, userId);
 
-    // store ids
-    acc.stripe.customerId = session.customer
-      ? typeof session.customer === "string"
+    // 1) Session aus Stripe holen
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["customer", "subscription"],
+    });
+
+    // 2) Bezahlt?
+    const paid =
+      session.payment_status === "paid" ||
+      session.status === "complete" ||
+      session.payment_status === "no_payment_required";
+
+    // 3) Customer + Subscription IDs übernehmen
+    const customerId =
+      typeof session.customer === "string"
         ? session.customer
-        : String(session.customer.id || "")
-      : acc.stripe.customerId;
+        : session.customer?.id;
 
-    acc.stripe.subscriptionId = session.subscription
-      ? typeof session.subscription === "string"
+    const subscriptionId =
+      typeof session.subscription === "string"
         ? session.subscription
-        : String(session.subscription.id || "")
-      : acc.stripe.subscriptionId;
+        : session.subscription?.id;
 
-    // status + cancellation if expanded
-    const sub =
-      session.subscription && typeof session.subscription === "object"
-        ? session.subscription
-        : null;
-    if (sub) {
-      acc.stripe.status =
-        String(sub.status || "").toLowerCase() || acc.stripe.status;
-      acc.stripe.cancelAtPeriodEnd = !!sub.cancel_at_period_end;
-      acc.stripe.currentPeriodEnd = sub.current_period_end
-        ? Number(sub.current_period_end) * 1000
-        : acc.stripe.currentPeriodEnd;
-    } else {
-      // fallback: if payment_status paid, assume active
-      if (session.payment_status === "paid" && !acc.stripe.status)
-        acc.stripe.status = "active";
+    if (customerId) acc.stripe.customerId = customerId;
+    if (subscriptionId) acc.stripe.subscriptionId = subscriptionId;
+
+    // 4) Subscription Status + Kündigungsdaten holen (wenn vorhanden)
+    if (acc.stripe.subscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(
+          acc.stripe.subscriptionId
+        );
+        acc.stripe.status = String(sub.status || "").toLowerCase();
+        acc.stripe.cancelAtPeriodEnd = !!sub.cancel_at_period_end;
+        acc.stripe.currentPeriodEnd = sub.current_period_end
+          ? Number(sub.current_period_end) * 1000
+          : null;
+      } catch (e) {
+        // nicht fatal – paid reicht für PRO
+      }
     }
 
-    acc.plan = isProStatus(acc.stripe.status) ? "PRO" : acc.plan;
-    acc.updatedAt = nowMs();
+    // 5) Plan setzen
+    if (paid) {
+      acc.plan = "PRO";
+      if (!acc.stripe.status) acc.stripe.status = "active";
+    } else {
+      acc.plan = "FREE";
+    }
+
+    acc.updatedAt = Date.now();
     saveDb(db);
 
     return res.json({
       ok: true,
-      user_id: acc.userId,
-      accountId: acc.accountId,
+      user_id: userId,
+      accountId,
       plan: effectivePlan(acc),
-      stripe: {
-        customerId: acc.stripe.customerId,
-        subscriptionId: acc.stripe.subscriptionId,
-        status: acc.stripe.status,
-        cancelAtPeriodEnd: !!acc.stripe.cancelAtPeriodEnd,
-        currentPeriodEnd: acc.stripe.currentPeriodEnd || null,
-        lastInvoiceStatus: acc.stripe.lastInvoiceStatus || null,
+      stripe: acc.stripe,
+      paid,
+      session: {
+        id: session.id,
+        status: session.status,
+        payment_status: session.payment_status,
+        mode: session.mode,
       },
-      ts: nowMs(),
+      ts: Date.now(),
     });
   } catch (e) {
-    console.error("sync checkout error:", e);
     return res.status(500).json({
       ok: false,
       error: "sync_failed",
