@@ -93,6 +93,19 @@ const PRO_BOOST_LIMIT = Number(process.env.PRO_BOOST_LIMIT || 50);
 const TRIAL_ENABLED = String(process.env.TRIAL_ENABLED || "0") === "1"; // ✅ OFF by default
 const TRIAL_LIMIT_24H = Number(process.env.TRIAL_LIMIT_24H || 3);
 
+// Maintenance (blocks billing routes)
+const MAINTENANCE_MODE =
+  String(process.env.MAINTENANCE_MODE || "").trim() === "1";
+
+function denyBilling(res) {
+  res.set("Retry-After", "3600");
+  return res.status(503).json({
+    ok: false,
+    error: "maintenance",
+    message: "Billing disabled during maintenance.",
+  });
+}
+
 // Stripe
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
 const STRIPE_PRICE_ID = String(process.env.STRIPE_PRICE_ID || "").trim();
@@ -752,6 +765,9 @@ app.post("/api/test", async (req, res) => {
 
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
+    // ✅ Wartung: Billing komplett sperren
+    if (MAINTENANCE_MODE) return denyBilling(res);
+
     if (!stripe || !STRIPE_PRICE_ID) {
       return res
         .status(500)
@@ -795,6 +811,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
 app.post("/api/sync-checkout-session", async (req, res) => {
   try {
+    // ✅ Wartung: PRO-Sync ebenfalls sperren (kein PRO-Aktivieren während Wartung)
+    if (MAINTENANCE_MODE) return denyBilling(res);
+
     if (!stripe)
       return res
         .status(500)
@@ -858,6 +877,9 @@ app.post("/api/sync-checkout-session", async (req, res) => {
 // Billing Portal handler (used by both routes)
 async function handlePortalSession(req, res) {
   try {
+    // ✅ Wartung: Billing Portal sperren
+    if (MAINTENANCE_MODE) return denyBilling(res);
+
     if (!stripe)
       return res
         .status(500)
