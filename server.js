@@ -121,7 +121,20 @@ const BOUNCER_MAX_PASSES = Math.max(
   Number(process.env.BOUNCER_MAX_PASSES || 0),
 );
 
-const REQUIRED_BANNED_STEMS = ["zukunf", "entdeck", "naechst"];
+const REQUIRED_BANNED_STEMS = [
+  "zukunf",
+  "entdeck",
+  "naechst",
+
+  // block "sorry / need more info" outputs
+  "tutmirleid",
+  "bittegib",
+  "benoetig",
+  "mehrinformation",
+  "imsorry",
+  "cantcomply",
+  "cannotcomply",
+];
 
 const DEFAULT_BANNED_STEMS = [
   "optimier",
@@ -143,9 +156,6 @@ const DEFAULT_BANNED_STEMS = [
   "leader",
   "luxus",
   "strateg",
-
-  // Optional (wenn du "Es tut mir leid..." NIE durchlassen willst):
-  // "estutmirleid", "kannichnicht", "cantcomply", "cannotcomply", "imsorry",
 ];
 
 function _normalizeForScan(input) {
@@ -237,38 +247,42 @@ function buildRepairPrompt({
   extra,
   outLang,
 }) {
-  const lang = outLang === "en" ? "English" : "Deutsch";
-  const list = (hits || []).map((h) => `- ${h}`).join("\n");
+  const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
+
+  const bannedAll = (
+    typeof ACTIVE_BANNED_STEMS !== "undefined" &&
+    Array.isArray(ACTIVE_BANNED_STEMS) &&
+    ACTIVE_BANNED_STEMS.length
+      ? ACTIVE_BANNED_STEMS
+      : []
+  ).join(", ");
+
+  const hitList = (hits || []).join(", ");
 
   return `
-Du bist ein gnadenloser Copy-Editor. Du reparierst den Output, ohne Entschuldigungen, ohne Meta, ohne Erklärungen.
-Zielsprache: ${lang}. Ton: ${String(tone || "").trim()}.
-Use-Case: ${String(useCase || "").trim()}.
-Thema: ${String(topic || "").trim()}
-Extra: ${String(extra || "").trim()}
+Du bist ein strenger Copy-Editor. Du lieferst FERTIGEN Content – kein Meta, keine Entschuldigungen.
 
-PROBLEM:
-Der Output enthält verbotene Wortstämme/Floskeln. Diese müssen vollständig entfernt werden.
+Zielsprache: ${lang}
+Use-Case: ${useCase}
+Ton: ${tone}
+Thema: ${topic}
 
-VERBOTEN (case-insensitive, auch als Teilwort):
-${list || "- (keine angegeben)"}
+ABSOLUTE HARD RULES:
+1) KEINE Einleitung, KEIN "Hier ist...", KEIN "Es tut mir leid".
+2) KEINE Floskeln, KEIN Marketing-Pathos. Schreib konkret und nüchtern.
+3) VERBOTEN: In deiner finalen Antwort darf KEIN Wortteil aus dieser Liste vorkommen:
+${bannedAll || "(leer)"}
+4) Treffer im letzten Output waren: ${hitList || "(keine)"} — DIESE müssen weg.
+5) Schreib den Content KOMPLETT NEU. NICHT umformulieren, NICHT kopieren.
 
-HARTE REPAIR-REGELN:
-1) Bewahre Struktur & Format exakt: Variante 1/2/3, Hook, 3 Bullets, CTA, "Link in Bio".
-2) Hook: max. 12 Wörter, kein Ausrufezeichen, kein Produktname.
-3) Jede Bullet: 1 Proof-Element (Zahl oder Zeit oder konkreter Output-Baustein).
-4) Keine Floskeln, kein Marketing-Sprech, keine generischen Claims.
-5) Wenn du merkst, du willst ein verbotenes Wort nutzen: beschreibe physische Realität / messbare Effekte.
-   Beispiele (nur Stil): "Puls unter 60", "90 Minuten Tiefenregeneration", "2 Tage ohne Slack", "6 Stunden Schlaf am Stück".
-6) KEIN "Entschuldigung", KEIN "ich kann nicht", KEIN Safety-Text. Du lieferst nur den reparierten Content.
+Format/Anforderungen (müssen exakt passen):
+${extra}
 
-ZU REPARIERENDER OUTPUT (1:1 Inhalt, aber du musst ihn umschreiben):
+Alter Output (nur zur Analyse, NICHT wiederverwenden):
 """
-${String(badOutput || "").trim()}
+${String(badOutput || "").slice(0, 2500)}
 """
-
-Gib NUR den reparierten Output aus, sonst nichts.
-`.trim();
+`;
 }
 
 // --------------------
@@ -997,7 +1011,7 @@ app.post("/api/test", async (req, res) => {
       apiKey: key,
       model: MODEL_BYOK,
       prompt: "ping",
-      temperature: 0.2,
+      temperature: 0.0,
     });
     return res.json({ ok: true, sample: String(text).slice(0, 40) });
   } catch (e) {
