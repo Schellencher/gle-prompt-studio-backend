@@ -112,8 +112,14 @@ function denyBilling(res) {
 }
 
 // ===============================
-// BOUNCER v1.1 — Quality Gate (Umlaut-sicher + Required stems immer aktiv)
+// BOUNCER v1.1 — server-side quality gate (Umlaut-sicher + Required stems)
 // ===============================
+
+const BOUNCER_ENABLED = String(process.env.BOUNCER_ENABLED || "0") === "1";
+const BOUNCER_MAX_PASSES = Math.max(
+  0,
+  Number(process.env.BOUNCER_MAX_PASSES || 0),
+);
 
 const REQUIRED_BANNED_STEMS = ["zukunf", "entdeck", "naechst"];
 
@@ -137,6 +143,9 @@ const DEFAULT_BANNED_STEMS = [
   "leader",
   "luxus",
   "strateg",
+
+  // Optional (wenn du "Es tut mir leid..." NIE durchlassen willst):
+  // "estutmirleid", "kannichnicht", "cantcomply", "cannotcomply", "imsorry",
 ];
 
 function _normalizeForScan(input) {
@@ -197,17 +206,16 @@ function getActiveBannedStems() {
   );
 }
 
-function findStemViolations(text, stems) {
-  const active =
-    Array.isArray(stems) && stems.length ? stems : getActiveBannedStems();
+const ACTIVE_BANNED_STEMS = getActiveBannedStems();
 
+function findStemViolations(text, stems = ACTIVE_BANNED_STEMS) {
   const hay = _normalizeForScan(text);
   if (!hay) return [];
 
   const hayCompact = hay.replace(/\s+/g, "");
 
   const hits = [];
-  for (const stemRaw of active) {
+  for (const stemRaw of stems) {
     const stem = _normalizeForScan(stemRaw).replace(/\s+/g, "");
     if (!stem) continue;
     if (hayCompact.includes(stem)) hits.push(stem);
@@ -217,7 +225,7 @@ function findStemViolations(text, stems) {
 }
 
 // ===============================
-// END BOUNCER v1.1 helpers
+// END BOUNCER v1.1
 // ===============================
 
 function buildRepairPrompt({
