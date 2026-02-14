@@ -1,4 +1,4 @@
-// backend/server.js — GLE Prompt Studio Backend (CLEAN FINAL v1.1)
+// backend/server.js — GLE Prompt Studio Backend (CLEAN FINAL)
 //
 // Features:
 // - BYOK + PRO(Server-Key) + optional BYOK_ONLY
@@ -6,11 +6,9 @@
 // - Quota: FREE/PRO monthly limits + Boost limit for PRO
 // - Stripe Checkout (Subscription) + Sync via session_id + Billing Portal
 // - Stripe Webhook handling (checkout.session.completed, customer.subscription.*)
-// - JSON file DB (Render persistent disk friendly via DATA_DIR=/var/data)
+// - JSON file DB (Render persistent disk friendly via DATA_DIR)
 // - CORS allowlist: studio.getlaunchedge.com + vercel preview + ENV override
-// - OpenAI call: Responses API + fallback to Chat Completions
-// - Server-side Bouncer: banned stems scan + rewrite loop (optional)
-// - Admin endpoint: set plan PRO/FREE via ADMIN_KEY (no DB file editing)
+// - ✅ Bouncer (server-side): detect banned stems + rewrite passes + hard fail 422
 //
 // Requirements:
 //   npm i express cors stripe
@@ -18,10 +16,10 @@
 //
 // ENV (recommended):
 //   PORT=3002
-//   DATA_DIR=/var/data
+//   DATA_DIR=/var/data   (Render disk) or ./data
 //
 //   BYOK_ONLY=0|1
-//   OPENAI_API_KEY_SERVER=sk_...   (server key for PRO / trial) [or OPENAI_API_KEY]
+//   OPENAI_API_KEY_SERVER=sk-...   (server key for PRO / trial)  [or OPENAI_API_KEY]
 //   OPENAI_API_BASE=https://api.openai.com/v1
 //
 //   MODEL_BYOK=gpt-4o-mini
@@ -35,11 +33,9 @@
 //   TRIAL_ENABLED=0|1
 //   TRIAL_LIMIT_24H=3
 //
-//   BOUNCER_ENABLED=1|0
+//   BOUNCER_ENABLED=1
 //   BOUNCER_MAX_PASSES=2
-//   BOUNCER_BANNED_STEMS=comma,separated,stems(optional)
-//
-//   ADMIN_KEY=long_random_secret
+//   BOUNCER_BANNED_STEMS=optimier,steiger,verbesser,erleb,profit,verpass,chance,exklus,konkurrenz,agentur,erfolg,nachst
 //
 //   STRIPE_SECRET_KEY=sk_live_...
 //   STRIPE_PRICE_ID=price_...
@@ -50,7 +46,7 @@
 //   CORS_ORIGINS=https://studio.getlaunchedge.com,https://gle-prompt-studio.vercel.app
 //
 // Notes:
-// - Frontend maintenance is handled via middleware. Backend MAINTENANCE_MODE only blocks billing routes if you enable it.
+// - Maintenance mode is handled in frontend middleware (Vercel ENV), but billing routes can be blocked here too.
 
 "use strict";
 
@@ -77,18 +73,9 @@ if (!_fetch) {
 // --------------------
 const PORT = Number(process.env.PORT || 3002);
 
-// ✅ IMPORTANT for Render persistence: set DATA_DIR=/var/data
 const DATA_DIR =
   String(process.env.DATA_DIR || "").trim() || path.join(__dirname, "data");
-
-// We store in one canonical file:
 const DB_FILE = path.join(DATA_DIR, "gle-db.json");
-
-// Backward-compat file names (optional migration if present)
-const LEGACY_FILES = [
-  path.join(DATA_DIR, "gle_users.json"),
-  path.join(DATA_DIR, "gle-db.json"),
-];
 
 const BYOK_ONLY = String(process.env.BYOK_ONLY || "0") === "1";
 
@@ -108,12 +95,13 @@ const FREE_LIMIT = Number(process.env.FREE_LIMIT || 25);
 const PRO_LIMIT = Number(process.env.PRO_LIMIT || 250);
 const PRO_BOOST_LIMIT = Number(process.env.PRO_BOOST_LIMIT || 50);
 
-const TRIAL_ENABLED = String(process.env.TRIAL_ENABLED || "0") === "1"; // recommended OFF for launch
+const TRIAL_ENABLED = String(process.env.TRIAL_ENABLED || "0") === "1"; // OFF by default
 const TRIAL_LIMIT_24H = Number(process.env.TRIAL_LIMIT_24H || 3);
 
-// Optional backend billing maintenance lock (frontend maintenance is separate)
+// Maintenance (blocks billing routes)
 const MAINTENANCE_MODE =
   String(process.env.MAINTENANCE_MODE || "").trim() === "1";
+
 function denyBilling(res) {
   res.set("Retry-After", "3600");
   return res.status(503).json({
@@ -123,10 +111,161 @@ function denyBilling(res) {
   });
 }
 
-// Admin
-const ADMIN_KEY = String(process.env.ADMIN_KEY || "").trim();
+// ===============================
+// BOUNCER v1.1 — Quality Gate (Umlaut-sicher + Required stems immer aktiv)
+// ===============================
 
+const REQUIRED_BANNED_STEMS = ["zukunf", "entdeck", "naechst"];
+
+const DEFAULT_BANNED_STEMS = [
+  "optimier",
+  "steiger",
+  "verbesser",
+  "erleb",
+  "profit",
+  "verpass",
+  "chance",
+  "exklus",
+  "konkurrenz",
+  "agentur",
+  "erfolg",
+  "naechst",
+  "nutz",
+  "vorteil",
+  "vorsp",
+  "sicher",
+  "leader",
+  "luxus",
+  "strateg",
+];
+
+function _normalizeForScan(input) {
+  let s = String(input || "").toLowerCase();
+
+  // Umlaut-Mapping VOR Diacritic-Strip
+  s = s
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss");
+
+  // generische Diacritics raus (é -> e)
+  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // alles außer a-z/0-9 zu Spaces, dann zusammenfalten
+  s = s
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  return s;
+}
+
+function _splitEnvStems(envVal) {
+  const raw = String(envVal || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function _dedupeKeepOrder(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const x of arr) {
+    const key = String(x || "").trim();
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+function getActiveBannedStems() {
+  const fromEnv = _splitEnvStems(process.env.BOUNCER_BANNED_STEMS);
+  const base = fromEnv.length ? fromEnv : DEFAULT_BANNED_STEMS;
+
+  const combined = _dedupeKeepOrder([...base, ...REQUIRED_BANNED_STEMS]);
+
+  // Stems normalisieren (ohne Spaces) → sauberer Scan
+  return _dedupeKeepOrder(
+    combined
+      .map((stem) => _normalizeForScan(stem).replace(/\s+/g, ""))
+      .filter(Boolean),
+  );
+}
+
+function findStemViolations(text, stems) {
+  const active =
+    Array.isArray(stems) && stems.length ? stems : getActiveBannedStems();
+
+  const hay = _normalizeForScan(text);
+  if (!hay) return [];
+
+  const hayCompact = hay.replace(/\s+/g, "");
+
+  const hits = [];
+  for (const stemRaw of active) {
+    const stem = _normalizeForScan(stemRaw).replace(/\s+/g, "");
+    if (!stem) continue;
+    if (hayCompact.includes(stem)) hits.push(stem);
+  }
+
+  return _dedupeKeepOrder(hits);
+}
+
+// ===============================
+// END BOUNCER v1.1 helpers
+// ===============================
+
+function buildRepairPrompt({
+  badOutput,
+  hits,
+  useCase,
+  tone,
+  topic,
+  extra,
+  outLang,
+}) {
+  const lang = outLang === "en" ? "English" : "Deutsch";
+  const list = (hits || []).map((h) => `- ${h}`).join("\n");
+
+  return `
+Du bist ein gnadenloser Copy-Editor. Du reparierst den Output, ohne Entschuldigungen, ohne Meta, ohne Erklärungen.
+Zielsprache: ${lang}. Ton: ${String(tone || "").trim()}.
+Use-Case: ${String(useCase || "").trim()}.
+Thema: ${String(topic || "").trim()}
+Extra: ${String(extra || "").trim()}
+
+PROBLEM:
+Der Output enthält verbotene Wortstämme/Floskeln. Diese müssen vollständig entfernt werden.
+
+VERBOTEN (case-insensitive, auch als Teilwort):
+${list || "- (keine angegeben)"}
+
+HARTE REPAIR-REGELN:
+1) Bewahre Struktur & Format exakt: Variante 1/2/3, Hook, 3 Bullets, CTA, "Link in Bio".
+2) Hook: max. 12 Wörter, kein Ausrufezeichen, kein Produktname.
+3) Jede Bullet: 1 Proof-Element (Zahl oder Zeit oder konkreter Output-Baustein).
+4) Keine Floskeln, kein Marketing-Sprech, keine generischen Claims.
+5) Wenn du merkst, du willst ein verbotenes Wort nutzen: beschreibe physische Realität / messbare Effekte.
+   Beispiele (nur Stil): "Puls unter 60", "90 Minuten Tiefenregeneration", "2 Tage ohne Slack", "6 Stunden Schlaf am Stück".
+6) KEIN "Entschuldigung", KEIN "ich kann nicht", KEIN Safety-Text. Du lieferst nur den reparierten Content.
+
+ZU REPARIERENDER OUTPUT (1:1 Inhalt, aber du musst ihn umschreiben):
+"""
+${String(badOutput || "").trim()}
+"""
+
+Gib NUR den reparierten Output aus, sonst nichts.
+`.trim();
+}
+
+// --------------------
 // Stripe
+// --------------------
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
 const STRIPE_PRICE_ID = String(process.env.STRIPE_PRICE_ID || "").trim();
 const STRIPE_WEBHOOK_SECRET = String(
@@ -165,119 +304,7 @@ const ALLOWED_ORIGINS = Array.from(
 );
 
 // --------------------
-// Bouncer (server-side)
-// --------------------
-const BOUNCER_ENABLED =
-  String(process.env.BOUNCER_ENABLED || "1").trim() !== "0";
-const BOUNCER_MAX_PASSES = Math.max(
-  0,
-  parseInt(process.env.BOUNCER_MAX_PASSES || "2", 10) || 2,
-);
-
-// Default: kurz halten (Stämme/Teilwörter)
-const DEFAULT_BANNED_STEMS = [
-  "automatis",
-  "optimier",
-  "steiger",
-  "verbesser",
-  "ermöglich",
-  "profit",
-  "verpass",
-  "chance",
-  "vorteil",
-  "exklus",
-  "konkurrenz",
-  "vorsp",
-  "profession",
-  "agentur",
-  "hochwert",
-  "beeindruck",
-  "revolution",
-  "innov",
-  "effiz",
-  "spann",
-  "strategie",
-  "qualit",
-  "einzig",
-  "erleb",
-  "erfahr",
-];
-
-const ENV_BANNED_STEMS = String(process.env.BOUNCER_BANNED_STEMS || "")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
-
-const ACTIVE_BANNED_STEMS = ENV_BANNED_STEMS.length
-  ? ENV_BANNED_STEMS
-  : DEFAULT_BANNED_STEMS;
-
-function _normalizeForScan(s) {
-  return String(s || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
-    .replace(/ß/g, "ss");
-}
-
-function findStemViolations(text) {
-  const norm = _normalizeForScan(text);
-  const hits = [];
-  for (const stem of ACTIVE_BANNED_STEMS) {
-    if (!stem) continue;
-    if (norm.includes(stem)) hits.push(stem);
-  }
-  // unique
-  return Array.from(new Set(hits));
-}
-
-function buildRepairPrompt({
-  badOutput,
-  hits,
-  useCase,
-  tone,
-  topic,
-  extra,
-  outLang,
-}) {
-  const lang =
-    String(outLang || "de")
-      .trim()
-      .toLowerCase() === "en"
-      ? "EN"
-      : "DE";
-  const hitList = (hits || []).map((h) => `"${h}"`).join(", ");
-  const cleanBad = String(badOutput || "").trim();
-
-  return `
-Du bist ein gnadenloser Text-Editor. Du bekommst einen fertigen Entwurf, der VERBOTENE Wortstämme enthält.
-
-VERBOTEN (case-insensitive, auch Teilwort): ${hitList}
-
-Aufgabe:
-1) Schreibe den ENTWURF komplett neu, gleiche Struktur wie vorher (Variante 1/2/3).
-2) KEINES der verbotenen Wörter/Wortstämme darf vorkommen.
-3) Kein Gelaber, keine Erklärungen, keine Meta-Kommentare.
-4) Jede Bullet muss Proof enthalten: Zahl ODER Zeit ODER konkreter Output-Baustein.
-5) Wenn du merkst, dass du in generische Marketingsprache rutschst: beschreibe physische Realität oder beobachtbare Resultate (z.B. Werte, Zeiten, konkrete Handlungen).
-6) Hook max 12 Wörter, ohne Ausrufezeichen.
-
-Kontext:
-Use-Case: ${String(useCase || "").trim()}
-Ton: ${String(tone || "").trim()}
-Sprache: ${lang}
-Thema: ${String(topic || "").trim()}
-Extra: ${String(extra || "").trim()}
-
-ENTWURF (nicht übernehmen, nur ersetzen):
-${cleanBad}
-
-Gib NUR den finalen Text aus.
-`.trim();
-}
-
-// --------------------
-// Simple JSON DB (in-memory + disk persistence)
+// Simple JSON DB
 // --------------------
 function ensureDir(dir) {
   try {
@@ -303,9 +330,19 @@ function firstDayNextMonthTs(ts = now()) {
   return new Date(y, m + 1, 1, 0, 0, 0, 0).getTime();
 }
 
-function stripeModeLabel() {
-  if (!stripe) return "DISABLED";
-  return STRIPE_SECRET_KEY.startsWith("sk_live") ? "LIVE" : "TEST";
+function randomId(prefix) {
+  const c = globalThis.crypto;
+  if (c?.getRandomValues) {
+    const b = new Uint8Array(8);
+    c.getRandomValues(b);
+    const hex = Array.from(b)
+      .map((x) => x.toString(16).padStart(2, "0"))
+      .join("");
+    return `${prefix}_${hex}`;
+  }
+  return `${prefix}_${Math.random().toString(16).slice(2)}${Math.random()
+    .toString(16)
+    .slice(2)}`.slice(0, 28);
 }
 
 const db = {
@@ -315,48 +352,18 @@ const db = {
 
 let _saveTimer = null;
 
-function _readJsonFile(p) {
-  const raw = fs.readFileSync(p, "utf8");
-  const parsed = JSON.parse(raw || "{}");
-  return parsed && typeof parsed === "object" ? parsed : {};
-}
-
 function loadDb() {
   ensureDir(DATA_DIR);
-
-  // Prefer canonical DB_FILE
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      const parsed = _readJsonFile(DB_FILE);
+  if (!fs.existsSync(DB_FILE)) return;
+  try {
+    const raw = fs.readFileSync(DB_FILE, "utf8");
+    const parsed = JSON.parse(raw || "{}");
+    if (parsed && typeof parsed === "object") {
       db.accounts = parsed.accounts || {};
       db.customers = parsed.customers || {};
-      return;
-    } catch (e) {
-      console.error("DB load error (canonical):", e);
     }
-  }
-
-  // Optional legacy migration
-  for (const legacy of LEGACY_FILES) {
-    if (!fs.existsSync(legacy)) continue;
-    try {
-      const parsed = _readJsonFile(legacy);
-      // legacy formats:
-      // 1) { accounts:{...}, customers:{...} }
-      // 2) { "acc_x": {...}, "acc_y": {...} } (flat)
-      if (parsed.accounts && typeof parsed.accounts === "object") {
-        db.accounts = parsed.accounts || {};
-        db.customers = parsed.customers || {};
-      } else {
-        db.accounts = parsed || {};
-        db.customers = {};
-      }
-      // Save into canonical file to unify
-      scheduleSave();
-      return;
-    } catch (e) {
-      console.error("DB load error (legacy):", legacy, e);
-    }
+  } catch (e) {
+    console.error("DB load error:", e);
   }
 }
 
@@ -372,7 +379,12 @@ function scheduleSave() {
     } catch (e) {
       console.error("DB save error:", e);
     }
-  }, 200);
+  }, 250);
+}
+
+function stripeModeLabel() {
+  if (!stripe) return "DISABLED";
+  return STRIPE_SECRET_KEY.startsWith("sk_live") ? "LIVE" : "TEST";
 }
 
 function getOrCreateAccount(accountId, userId) {
@@ -405,23 +417,11 @@ function getOrCreateAccount(accountId, userId) {
     };
     scheduleSave();
   } else {
-    // Migrate / normalize existing without overwriting plan
-    const acc = db.accounts[id];
-    if (!acc.accountId) acc.accountId = id;
-    if (!acc.userId) acc.userId = uid;
-    if (!acc.createdAt) acc.createdAt = now();
-    if (!acc.plan) acc.plan = "FREE"; // ✅ do NOT override existing PRO
-    if (!acc.stripe) acc.stripe = {};
-    if (!acc.usage) acc.usage = {};
-    if (!acc.trial) acc.trial = { events: [] };
-
-    // Update userId if provided and changed
-    if (uid && acc.userId !== uid) {
-      acc.userId = uid;
+    if (uid && db.accounts[id].userId !== uid) {
+      db.accounts[id].userId = uid;
       scheduleSave();
     }
   }
-
   return db.accounts[id];
 }
 
@@ -454,33 +454,20 @@ function getIds(req) {
 }
 
 function getApiKey(req) {
-  // ✅ official header name in your backend: x-gle-api-key
-  return String(req.headers["x-gle-api-key"] || "").trim();
-}
-
-function requireAdmin(req, res) {
-  if (!ADMIN_KEY) {
-    res.status(503).json({
-      ok: false,
-      error: "admin_disabled",
-      message: "ADMIN_KEY is not set on server.",
-    });
-    return false;
-  }
-  const key = String(req.headers["x-admin-key"] || "").trim();
-  if (!key || key !== ADMIN_KEY) {
-    res.status(401).json({ ok: false, error: "unauthorized" });
-    return false;
-  }
-  return true;
+  // accept both for backwards compatibility
+  return String(
+    req.headers["x-gle-api-key"] ||
+      req.headers["x-openai-key"] ||
+      req.headers["x-api-key"] ||
+      "",
+  ).trim();
 }
 
 function allowedOrigin(origin) {
   if (!origin) return true; // curl/no-origin
-
   if (ALLOWED_ORIGINS.includes(origin)) return true;
 
-  // ✅ allow ALL Vercel previews
+  // allow all Vercel preview URLs
   try {
     const u = new URL(origin);
     if (u.hostname.endsWith(".vercel.app")) return true;
@@ -560,13 +547,7 @@ function enforceQuota(account, wantsBoost) {
     }
   }
 
-  return {
-    ok: true,
-    used,
-    limit,
-    boostUsed: Number(account.usage.boostUsed || 0),
-    boostLimit: PRO_BOOST_LIMIT,
-  };
+  return { ok: true };
 }
 
 function markUsage(account, wantsBoost) {
@@ -616,7 +597,121 @@ function markTrial(account) {
 }
 
 // --------------------
-// Prompt builder (Elite Copy - strict)
+// OpenAI call (Responses API + fallback)
+// --------------------
+async function openaiResponses({ apiKey, model, input, temperature }) {
+  const url = `${OPENAI_API_BASE.replace(/\/$/, "")}/responses`;
+  const res = await _fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      input,
+      temperature: typeof temperature === "number" ? temperature : undefined,
+    }),
+  });
+
+  const text = await res.text().catch(() => "");
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { _text: text };
+  }
+
+  if (!res.ok) {
+    const msg =
+      data?.error?.message ||
+      data?.message ||
+      data?._text ||
+      `openai_error_${res.status}`;
+    throw new Error(String(msg));
+  }
+
+  if (typeof data.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const out = Array.isArray(data.output) ? data.output : [];
+  for (const item of out) {
+    const content = item?.content || [];
+    for (const c of content) {
+      if (c?.type === "output_text" && typeof c?.text === "string") {
+        const s = c.text.trim();
+        if (s) return s;
+      }
+    }
+  }
+
+  throw new Error("No text from OpenAI");
+}
+
+async function openaiChatCompletions({ apiKey, model, prompt, temperature }) {
+  const url = `${OPENAI_API_BASE.replace(/\/$/, "")}/chat/completions`;
+  const res = await _fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            'Du bist "GLE Prompt Studio". Folge den Regeln im User-Prompt strikt und gib nur den fertigen Output aus.',
+        },
+        { role: "user", content: String(prompt || "") },
+      ],
+      temperature: typeof temperature === "number" ? temperature : 0.6,
+    }),
+  });
+
+  const text = await res.text().catch(() => "");
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { _text: text };
+  }
+
+  if (!res.ok) {
+    const msg =
+      data?.error?.message ||
+      data?.message ||
+      data?._text ||
+      `openai_error_${res.status}`;
+    throw new Error(String(msg));
+  }
+
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === "string" && content.trim()) return content.trim();
+  throw new Error("No text from OpenAI");
+}
+
+async function callOpenAI({ apiKey, model, prompt, temperature }) {
+  try {
+    return await openaiResponses({ apiKey, model, input: prompt, temperature });
+  } catch (e) {
+    const msg = String(e?.message || "");
+    if (msg.includes("404") || msg.toLowerCase().includes("not found")) {
+      return await openaiChatCompletions({
+        apiKey,
+        model,
+        prompt,
+        temperature,
+      });
+    }
+    throw e;
+  }
+}
+
+// --------------------
+// Prompt builder
 // --------------------
 function buildMasterPrompt({ useCase, tone, topic, extra, outLang }) {
   const lang =
@@ -627,6 +722,7 @@ function buildMasterPrompt({ useCase, tone, topic, extra, outLang }) {
   const cleanTopic = String(topic || "").trim();
   const cleanExtra = String(extra || "").trim();
 
+  // 🔥 Production prompt: liefert fertigen Content (kein Master-Prompt / keine Templates)
   return `
 Du bist ein Elite-Copywriter für High-Performance SaaS (Creator & Solopreneure).
 Dein Job: Schreibe fertigen Content, der nach Premium klingt und sofort nutzbar ist.
@@ -638,18 +734,22 @@ HARD RULES (müssen eingehalten werden):
 1) KEIN GELABER: Keine Einleitung ("Hier sind..."), keine Erklärungen, keine Meta-Kommentare.
 2) KEINE PROMPT-WÖRTER: Schreibe niemals "Prompt", "Master-Prompt", "Input-Fragen", "Vorlage", "Template".
 3) KEIN TECH-TALK: Niemals BYOK, Server-Key, Modelle, Tokens, Boost, Trial erwähnen.
-4) VERBOTENE PHRASES: Niemals: "Schluss mit", "Entdecke", "Bist du bereit", "Tauche ein", "Revolutionär", "spannend".
-5) KEINE PLATZHALTER: Keine Klammern, keine Variablen wie [ZIELGRUPPE], keine Fragen an den User.
-6) KONKRET statt FLUFF: Keine leeren Claims ohne sichtbares Resultat.
-7) JE VARIANTE anderer psychologischer Winkel:
+4) KEINE PLATZHALTER: Keine Klammern, keine Variablen wie [ZIELGRUPPE], keine Fragen an den User.
+5) KONKRET statt FLUFF: Keine leeren Claims ohne konkreten Nutzen.
+6) JE VARIANTE anderer psychologischer Winkel:
    - Variante 1 (Logik/ROI): Zeitgewinn, messbarer Nutzen (wenn möglich Zahlen).
-   - Variante 2 (Status/Brand): Außenwirkung ohne Buzzwords, wirkt sofort sauber.
-   - Variante 3 (FOMO): Vorsprung ohne Trigger-Wörter, Risiko "zu spät".
-8) Emojis: maximal 1 pro Variante, nur minimalistisch (⚡ 📈 💎 oder →). Keine Smileys.
-9) PUNCH: Aktive Verben. Keine Weichmacher wie "kannst", "solltest", "würde", "helfen", "versuchen".
-10) HOOK: Max 12 Wörter, kein Ausrufezeichen, kein Produktname, startet mit Nutzen/Schmerz/Zahl.
-11) BULLETS: Jede Bullet MUSS Proof enthalten: Zahl ODER Zeit ODER konkreter Output-Baustein.
-12) ANTI-FLOSKEL: Wenn es nach 08/15 Marketing klingt → neu schreiben.
+   - Variante 2 (Status/Brand): Außenwirkung, Professionalität, wirkt wie Agentur-Niveau.
+   - Variante 3 (FOMO): Vorsprung, Exklusivität, Risiko abgehängt zu werden.
+7) Emojis: maximal 1 pro Variante, nur minimalistisch (⚡ 📈 💎 oder →). Keine Smileys.
+8) PUNCH: aktive Verben. Keine Weichmacher wie "kannst", "solltest", "würde", "helfen", "versuchen".
+9) HOOK-REGEL (STRIKT):
+- Länge: Maximal 12 Wörter.
+- Hook startet IMMER mit Nutzen/Schmerz/Zahl/FOMO – NICHT mit Produktname.
+- Hook ohne Ausrufezeichen. Eiskalt, präzise.
+10) BULLET-REGEL (BEWEISPFLICHT):
+- Jede Bullet MUSS mindestens 1 Proof-Element enthalten: (Zahl ODER Zeit ODER klarer Output-Baustein).
+- Wenn eine Bullet kein Proof-Element enthält: Bullet verwerfen und neu schreiben.
+11) ANTI-FLOSKEL: Wenn es auch von 1.000 Tools stammen könnte, ist es verboten.
 
 AUFGABE:
 Erzeuge den fertigen Output direkt – basierend auf den Infos unten.
@@ -688,142 +788,10 @@ Link in Bio
 }
 
 // --------------------
-// OpenAI call (Responses API + fallback)
-// --------------------
-async function openaiResponses({ apiKey, model, input }) {
-  const url = `${OPENAI_API_BASE.replace(/\/$/, "")}/responses`;
-  const res = await _fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, input }),
-  });
-
-  const text = await res.text().catch(() => "");
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { _text: text };
-  }
-
-  if (!res.ok) {
-    const msg =
-      data?.error?.message ||
-      data?.message ||
-      data?._text ||
-      `openai_error_${res.status}`;
-    const err = new Error(String(msg));
-    err.status = res.status;
-    throw err;
-  }
-
-  if (typeof data.output_text === "string" && data.output_text.trim()) {
-    return data.output_text.trim();
-  }
-
-  const out = Array.isArray(data.output) ? data.output : [];
-  for (const item of out) {
-    const content = item?.content || [];
-    for (const c of content) {
-      if (c?.type === "output_text" && typeof c?.text === "string") {
-        const s = c.text.trim();
-        if (s) return s;
-      }
-    }
-  }
-
-  throw new Error("No text from OpenAI (responses)");
-}
-
-async function openaiChatCompletions({
-  apiKey,
-  model,
-  prompt,
-  temperature = 0.6,
-}) {
-  const url = `${OPENAI_API_BASE.replace(/\/$/, "")}/chat/completions`;
-  const res = await _fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature,
-      messages: [
-        {
-          role: "system",
-          content:
-            'Du bist "GLE Prompt Studio". Folge den Regeln im User-Prompt strikt und gib nur den fertigen Output aus.',
-        },
-        { role: "user", content: String(prompt || "") },
-      ],
-    }),
-  });
-
-  const text = await res.text().catch(() => "");
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { _text: text };
-  }
-
-  if (!res.ok) {
-    const msg =
-      data?.error?.message ||
-      data?.message ||
-      data?._text ||
-      `openai_error_${res.status}`;
-    const err = new Error(String(msg));
-    err.status = res.status;
-    throw err;
-  }
-
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content === "string" && content.trim()) return content.trim();
-
-  throw new Error("No text from OpenAI (chat)");
-}
-
-async function callOpenAI({ apiKey, model, prompt, temperature = 0.6 }) {
-  // Prefer Responses API; fallback on 404/Not Found
-  try {
-    return await openaiResponses({ apiKey, model, input: prompt });
-  } catch (e) {
-    const msg = String(e?.message || "");
-    const st = Number(e?.status || 0);
-    if (st === 404 || msg.toLowerCase().includes("not found")) {
-      return await openaiChatCompletions({
-        apiKey,
-        model,
-        prompt,
-        temperature,
-      });
-    }
-    // Some gateways return 404 in message body only
-    if (msg.includes("404") || msg.toLowerCase().includes("not found")) {
-      return await openaiChatCompletions({
-        apiKey,
-        model,
-        prompt,
-        temperature,
-      });
-    }
-    throw e;
-  }
-}
-
-// --------------------
 // Express app
 // --------------------
 loadDb();
 const app = express();
-app.set("trust proxy", 1);
 
 // Stripe webhook must use RAW body (before json middleware)
 app.post(
@@ -945,7 +913,8 @@ app.use(
       "x-gle-user",
       "x-gle-account-id",
       "x-gle-api-key",
-      "x-admin-key",
+      "x-openai-key",
+      "x-api-key",
     ],
   }),
 );
@@ -955,16 +924,9 @@ app.use(express.json({ limit: "1mb" }));
 // --------------------
 // Routes
 // --------------------
-app.get("/", (req, res) => {
-  res.type("text/plain").send("GLE Prompt Studio Backend OK");
-});
-
 app.get("/api/health", (req, res) => {
   return res.json({
     status: "ok",
-    port: PORT,
-    dataDir: DATA_DIR,
-    dbFile: DB_FILE,
     byokOnly: BYOK_ONLY,
     stripe: !!stripe,
     stripeMode: stripeModeLabel(),
@@ -977,7 +939,6 @@ app.get("/api/health", (req, res) => {
       maxPasses: BOUNCER_MAX_PASSES,
       stemsCount: ACTIVE_BANNED_STEMS.length,
     },
-    admin: { enabled: !!ADMIN_KEY },
     allowedOrigins: ALLOWED_ORIGINS,
   });
 });
@@ -1030,57 +991,14 @@ app.post("/api/test", async (req, res) => {
       prompt: "ping",
       temperature: 0.2,
     });
-
-    return res.json({ ok: true, sample: String(text).slice(0, 60) });
+    return res.json({ ok: true, sample: String(text).slice(0, 40) });
   } catch (e) {
-    return res.status(400).json({
-      ok: false,
-      error: String(e?.message || "bad_key"),
-    });
+    return res
+      .status(400)
+      .json({ ok: false, error: String(e?.message || "bad_key") });
   }
 });
 
-// Admin: set plan PRO/FREE (no DB editing)
-app.post("/api/admin/set-plan", (req, res) => {
-  try {
-    if (!requireAdmin(req, res)) return;
-
-    const accountId = String(req.body?.accountId || "").trim();
-    const planRaw = String(req.body?.plan || "")
-      .trim()
-      .toUpperCase();
-    const userId = String(req.body?.userId || "").trim();
-
-    if (!accountId)
-      return res.status(400).json({ ok: false, error: "missing_account_id" });
-
-    if (planRaw !== "FREE" && planRaw !== "PRO") {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_plan",
-        message: 'plan must be "FREE" or "PRO"',
-      });
-    }
-
-    const acc = getOrCreateAccount(accountId, userId || "admin");
-    acc.plan = planRaw;
-    if (userId) acc.userId = userId;
-
-    scheduleSave();
-
-    return res.json({
-      ok: true,
-      accountId: acc.accountId,
-      userId: acc.userId,
-      plan: acc.plan,
-    });
-  } catch (e) {
-    console.error("/api/admin/set-plan error:", e);
-    return res.status(500).json({ ok: false, error: "admin_failed" });
-  }
-});
-
-// Stripe checkout
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
@@ -1123,7 +1041,6 @@ app.post("/api/create-checkout-session", async (req, res) => {
   }
 });
 
-// Sync session_id to activate PRO if webhook missed
 app.post("/api/sync-checkout-session", async (req, res) => {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
@@ -1393,15 +1310,18 @@ app.post("/api/generate", async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.type("text/plain").send("GLE Prompt Studio Backend OK");
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ GLE backend running on :${PORT}`);
-  console.log(`DATA_DIR=${DATA_DIR}`);
-  console.log(`DB: ${DB_FILE}`);
   console.log(`CORS allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(
-    `BYOK_ONLY=${BYOK_ONLY ? "1" : "0"} TRIAL_ENABLED=${TRIAL_ENABLED ? "1" : "0"} BOUNCER=${BOUNCER_ENABLED ? "1" : "0"}(${BOUNCER_MAX_PASSES})`,
+    `BYOK_ONLY=${BYOK_ONLY ? "1" : "0"} TRIAL_ENABLED=${TRIAL_ENABLED ? "1" : "0"}`,
   );
   console.log(
-    `MODELS byok=${MODEL_BYOK} pro=${MODEL_PRO} boost=${MODEL_BOOST} | STRIPE=${stripeModeLabel()}`,
+    `BOUNCER_ENABLED=${BOUNCER_ENABLED ? "1" : "0"} BOUNCER_MAX_PASSES=${BOUNCER_MAX_PASSES}`,
   );
+  console.log(`DB: ${DB_FILE}`);
 });
