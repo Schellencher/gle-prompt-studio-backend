@@ -1321,7 +1321,7 @@ app.listen(PORT, "0.0.0.0", () => {
     `BYOK_ONLY=${BYOK_ONLY ? "1" : "0"} TRIAL_ENABLED=${TRIAL_ENABLED ? "1" : "0"}`,
   );
   console.log(
-    `BOUNCER_ENABLED=${BOUNCER_ENABLED ? "1" : "0"} BOUNCER_MAX_PASSES=${BOUNCER_MAX_PASSES}`,
+    `BOUNCER_ENABLED=${String(process.env.BOUNCER_ENABLED || "0")} BOUNCER_MAX_PASSES=${String(process.env.BOUNCER_MAX_PASSES || "0")}`,
   );
   console.log(`DB: ${DB_FILE}`);
 });
