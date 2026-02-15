@@ -1481,3 +1481,7 @@ app.post("/api/generate", async (req, res) => {
     });
   }
 });
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ GLE Engine Online | Port: ${PORT}`);
+});
