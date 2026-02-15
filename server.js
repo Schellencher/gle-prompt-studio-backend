@@ -1323,7 +1323,7 @@ app.post("/api/generate", async (req, res) => {
 
     // Debug-Header (hilft dir sofort zu sehen was läuft)
     res.setHeader("x-gle-engine", engineLabel);
-    res.setHeader("x-gle-model", modelToUse);
+    res.setHeader("x-gle-model", engineLabel); // legacy: nur public label
 
     // --------------------
     // Quota
@@ -1439,24 +1439,46 @@ app.post("/api/generate", async (req, res) => {
       renewAt: computeRenewAt(acc),
       cancelAt: computeCancelAt(acc),
     });
-
     // --------------------
-    // LAST LINE DEFENSE (UI + Output clean)
+    // LAST LINE DEFENSE (UI + Output clean) + PUBLIC HEADERS
     // --------------------
-    const publicModel = wantsBoost
-      ? ENGINE_ULTRA
-      : mode === "TRIAL_SERVER"
-        ? ENGINE_TRIAL
-        : mode === "PRO_SERVER"
-          ? ENGINE_PRO
-          : ENGINE_BYOK;
+    res.setHeader("x-gle-engine", engineLabel);
+    res.setHeader("x-gle-model", engineLabel); // legacy header -> nur public label
 
     output = String(output || "")
-      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
-      .replace(/\blink\s+in\s+bio\b/gi, "")
-      .replace(/\n{3,}/g, "\n\n")
+      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
+      .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    return res.json({
+      ok: true,
+      output,
+      mode,
+      model: engineLabel, // ✅ NIE mehr gpt-...
+      plan: isPro ? "PRO" : "FREE",
+      used: acc.usage.used,
+      limit: isPro ? PRO_LIMIT : FREE_LIMIT,
+      boostUsed: acc.usage.boostUsed,
+      boostLimit: PRO_BOOST_LIMIT,
+      renewAt: computeRenewAt(acc),
+      cancelAt: computeCancelAt(acc),
+    });
+
+    output = String(output || "")
+      .replace(/\u00A0/g, " ") // NBSP kill
+      // komplette "Link in Bio" Zeilen entfernen (DE/EN Varianten)
+      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
+      .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
+      // falls inline irgendwo drin: auch noch raus
+      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+      .replace(/\blink\s+in\s+bio\b/gi, "")
+      // Whitespace cleanup
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
 
     return res.json({
@@ -1480,8 +1502,14 @@ app.post("/api/generate", async (req, res) => {
       message: e?.message || String(e),
     });
   }
-});
+}); // ✅ WICHTIG: endet app.post("/api/generate", ...)
 
+// optional root
+app.get("/", (req, res) =>
+  res.type("text/plain").send("GLE Prompt Studio Backend OK"),
+);
+
+// ✅ Server start ganz unten (Top-Level, nicht in einer Route!)
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ GLE Engine Online | Port: ${PORT}`);
 });
