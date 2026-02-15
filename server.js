@@ -1,57 +1,25 @@
-// backend/server.js — GLE Prompt Studio Backend (CLEAN FINAL)
-//
-// Features:
-// - BYOK + PRO(Server-Key) + optional BYOK_ONLY
-// - Trial optional (rolling 24h) via TRIAL_ENABLED (default OFF)
-// - Quota: FREE/PRO monthly limits + Boost limit for PRO
-// - Stripe Checkout (Subscription) + Sync via session_id + Billing Portal
-// - Stripe Webhook handling (checkout.session.completed, customer.subscription.*)
-// - JSON file DB (Render persistent disk friendly via DATA_DIR)
-// - CORS allowlist: studio.getlaunchedge.com + vercel preview + ENV override
-// - ✅ Bouncer (server-side): detect banned stems + rewrite passes + hard fail 422
-//
-// Requirements:
-//   npm i express cors stripe
-//   (optional, if Node < 18): npm i node-fetch@2
-//
-// ENV (recommended):
-//   PORT=3002
-//   DATA_DIR=/var/data   (Render disk) or ./data
-//
-//   BYOK_ONLY=0|1
-//   OPENAI_API_KEY_SERVER=sk-...   (server key for PRO / trial)  [or OPENAI_API_KEY]
-//   OPENAI_API_BASE=https://api.openai.com/v1
-//
-//   MODEL_BYOK=gpt-4o-mini
-//   MODEL_PRO=gpt-4o
-//   MODEL_BOOST=gpt-4o
-//
-//   FREE_LIMIT=25
-//   PRO_LIMIT=250
-//   PRO_BOOST_LIMIT=50
-//
-//   TRIAL_ENABLED=0|1
-//   TRIAL_LIMIT_24H=3
-//
-//   BOUNCER_ENABLED=1
-//   BOUNCER_MAX_PASSES=2
-//   BOUNCER_BANNED_STEMS=optimier,steiger,verbesser,erleb,profit,verpass,chance,exklus,konkurrenz,agentur,erfolg,nachst
-//
-//   STRIPE_SECRET_KEY=sk_live_...
-//   STRIPE_PRICE_ID=price_...
-//   STRIPE_WEBHOOK_SECRET=whsec_...
-//
-//   FRONTEND_URL=https://studio.getlaunchedge.com
-//   STRIPE_RETURN_URL=https://studio.getlaunchedge.com
-//   CORS_ORIGINS=https://studio.getlaunchedge.com,https://gle-prompt-studio.vercel.app
-//
-// Notes:
-// - Maintenance mode is handled in frontend middleware (Vercel ENV), but billing routes can be blocked here too.
-
 "use strict";
+
+/**
+ * GLE Prompt Studio Backend — CLEAN FINAL (v2)
+ *
+ * Features:
+ * - BYOK + PRO(Server-Key) + optional BYOK_ONLY
+ * - Trial optional (rolling 24h) via TRIAL_ENABLED (default OFF)
+ * - Quota: FREE/PRO monthly limits + Boost limit for PRO
+ * - Stripe Checkout (Subscription) + Sync via session_id + Billing Portal
+ * - Stripe Webhook handling (checkout.session.completed, customer.subscription.*)
+ * - JSON file DB (Render persistent disk friendly via DATA_DIR)
+ * - CORS allowlist (studio.getlaunchedge.com + vercel preview + ENV override)
+ * - OpenAI call: Responses API + fallback Chat Completions
+ * - Server-side Bouncer: banned stems scan + rewrite passes + hard fail 422
+ * - ✅ CTA normalizer + neutral CTA enforcement + hot-stem sanitizer
+ * - Admin endpoint: set plan PRO/FREE via ADMIN_KEY
+ */
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const Stripe = require("stripe");
@@ -78,7 +46,9 @@ const DATA_DIR =
 const DB_FILE = path.join(DATA_DIR, "gle-db.json");
 
 const BYOK_ONLY = String(process.env.BYOK_ONLY || "0") === "1";
-
+// --------------------
+// OpenAI / Models
+// --------------------
 const OPENAI_API_BASE =
   String(process.env.OPENAI_API_BASE || "").trim() ||
   "https://api.openai.com/v1";
@@ -87,203 +57,41 @@ const SERVER_OPENAI_KEY =
   String(process.env.OPENAI_API_KEY_SERVER || "").trim() ||
   String(process.env.OPENAI_API_KEY || "").trim();
 
+// Internal model IDs (never shown to users)
 const MODEL_BYOK = String(process.env.MODEL_BYOK || "gpt-4o-mini").trim();
 const MODEL_PRO = String(process.env.MODEL_PRO || "gpt-4o").trim();
 const MODEL_BOOST = String(process.env.MODEL_BOOST || "gpt-4o").trim();
 
+// Public engine labels (shown in UI)
+const ENGINE_BYOK = String(
+  process.env.ENGINE_BYOK || "GLE Core v2.4 (BYOK)",
+).trim();
+const ENGINE_PRO = String(
+  process.env.ENGINE_PRO || "GLE Core v2.4 (Active)",
+).trim();
+const ENGINE_TRIAL = String(
+  process.env.ENGINE_TRIAL || "GLE Core v2.4 (Trial)",
+).trim();
+const ENGINE_ULTRA = String(
+  process.env.ENGINE_ULTRA || "High-Density Engine (Ultra)",
+).trim();
+
+// --------------------
+// Limits / Trial
+// --------------------
 const FREE_LIMIT = Number(process.env.FREE_LIMIT || 25);
 const PRO_LIMIT = Number(process.env.PRO_LIMIT || 250);
 const PRO_BOOST_LIMIT = Number(process.env.PRO_BOOST_LIMIT || 50);
 
-const TRIAL_ENABLED = String(process.env.TRIAL_ENABLED || "0") === "1"; // OFF by default
+const TRIAL_ENABLED = String(process.env.TRIAL_ENABLED || "0") === "1";
 const TRIAL_LIMIT_24H = Number(process.env.TRIAL_LIMIT_24H || 3);
 
 // Maintenance (blocks billing routes)
 const MAINTENANCE_MODE =
   String(process.env.MAINTENANCE_MODE || "").trim() === "1";
 
-function denyBilling(res) {
-  res.set("Retry-After", "3600");
-  return res.status(503).json({
-    ok: false,
-    error: "maintenance",
-    message: "Billing disabled during maintenance.",
-  });
-}
-
-// ===============================
-// BOUNCER v1.1 — server-side quality gate (Umlaut-sicher + Required stems)
-// ===============================
-
-const BOUNCER_ENABLED = String(process.env.BOUNCER_ENABLED || "0") === "1";
-const BOUNCER_MAX_PASSES = Math.max(
-  0,
-  Number(process.env.BOUNCER_MAX_PASSES || 0),
-);
-
-const REQUIRED_BANNED_STEMS = [
-  "zukunf",
-  "entdeck",
-  "naechst",
-
-  // block "sorry / need more info" outputs
-  "tutmirleid",
-  "bittegib",
-  "benoetig",
-  "mehrinformation",
-  "imsorry",
-  "cantcomply",
-  "cannotcomply",
-];
-
-const DEFAULT_BANNED_STEMS = [
-  "optimier",
-  "steiger",
-  "verbesser",
-  "erleb",
-  "profit",
-  "verpass",
-  "chance",
-  "exklus",
-  "konkurrenz",
-  "agentur",
-  "erfolg",
-  "naechst",
-  "nutz",
-  "vorteil",
-  "vorsp",
-  "sicher",
-  "leader",
-  "luxus",
-  "strateg",
-];
-
-function _normalizeForScan(input) {
-  let s = String(input || "").toLowerCase();
-
-  // Umlaut-Mapping VOR Diacritic-Strip
-  s = s
-    .replace(/ä/g, "ae")
-    .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
-    .replace(/ß/g, "ss");
-
-  // generische Diacritics raus (é -> e)
-  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-  // alles außer a-z/0-9 zu Spaces, dann zusammenfalten
-  s = s
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-
-  return s;
-}
-
-function _splitEnvStems(envVal) {
-  const raw = String(envVal || "").trim();
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function _dedupeKeepOrder(arr) {
-  const seen = new Set();
-  const out = [];
-  for (const x of arr) {
-    const key = String(x || "").trim();
-    if (!key) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-  }
-  return out;
-}
-
-function getActiveBannedStems() {
-  const fromEnv = _splitEnvStems(process.env.BOUNCER_BANNED_STEMS);
-  const base = fromEnv.length ? fromEnv : DEFAULT_BANNED_STEMS;
-
-  const combined = _dedupeKeepOrder([...base, ...REQUIRED_BANNED_STEMS]);
-
-  // Stems normalisieren (ohne Spaces) → sauberer Scan
-  return _dedupeKeepOrder(
-    combined
-      .map((stem) => _normalizeForScan(stem).replace(/\s+/g, ""))
-      .filter(Boolean),
-  );
-}
-
-const ACTIVE_BANNED_STEMS = getActiveBannedStems();
-
-function findStemViolations(text, stems = ACTIVE_BANNED_STEMS) {
-  const hay = _normalizeForScan(text);
-  if (!hay) return [];
-
-  const hayCompact = hay.replace(/\s+/g, "");
-
-  const hits = [];
-  for (const stemRaw of stems) {
-    const stem = _normalizeForScan(stemRaw).replace(/\s+/g, "");
-    if (!stem) continue;
-    if (hayCompact.includes(stem)) hits.push(stem);
-  }
-
-  return _dedupeKeepOrder(hits);
-}
-
-// ===============================
-// END BOUNCER v1.1
-// ===============================
-
-function buildRepairPrompt({
-  badOutput,
-  hits,
-  useCase,
-  tone,
-  topic,
-  extra,
-  outLang,
-}) {
-  const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
-
-  const bannedAll = (
-    typeof ACTIVE_BANNED_STEMS !== "undefined" &&
-    Array.isArray(ACTIVE_BANNED_STEMS) &&
-    ACTIVE_BANNED_STEMS.length
-      ? ACTIVE_BANNED_STEMS
-      : []
-  ).join(", ");
-
-  const hitList = (hits || []).join(", ");
-
-  return `
-Du bist ein strenger Copy-Editor. Du lieferst FERTIGEN Content – kein Meta, keine Entschuldigungen.
-
-Zielsprache: ${lang}
-Use-Case: ${useCase}
-Ton: ${tone}
-Thema: ${topic}
-
-ABSOLUTE HARD RULES:
-1) KEINE Einleitung, KEIN "Hier ist...", KEIN "Es tut mir leid".
-2) KEINE Floskeln, KEIN Marketing-Pathos. Schreib konkret und nüchtern.
-3) VERBOTEN: In deiner finalen Antwort darf KEIN Wortteil aus dieser Liste vorkommen:
-${bannedAll || "(leer)"}
-4) Treffer im letzten Output waren: ${hitList || "(keine)"} — DIESE müssen weg.
-5) Schreib den Content KOMPLETT NEU. NICHT umformulieren, NICHT kopieren.
-
-Format/Anforderungen (müssen exakt passen):
-${extra}
-
-Alter Output (nur zur Analyse, NICHT wiederverwenden):
-"""
-${String(badOutput || "").slice(0, 2500)}
-"""
-`;
-}
+// Admin
+const ADMIN_KEY = String(process.env.ADMIN_KEY || "").trim();
 
 // --------------------
 // Stripe
@@ -311,7 +119,23 @@ const stripe = STRIPE_SECRET_KEY
   ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2025-12-15.clover" })
   : null;
 
-// CORS origins
+function stripeModeLabel() {
+  if (!stripe) return "DISABLED";
+  return STRIPE_SECRET_KEY.startsWith("sk_live") ? "LIVE" : "TEST";
+}
+
+function denyBilling(res) {
+  res.set("Retry-After", "3600");
+  return res.status(503).json({
+    ok: false,
+    error: "maintenance",
+    message: "Billing disabled during maintenance.",
+  });
+}
+
+// --------------------
+// CORS
+// --------------------
 const defaultOrigins = [
   "https://studio.getlaunchedge.com",
   "https://gle-prompt-studio.vercel.app",
@@ -324,6 +148,24 @@ const extraOrigins = String(process.env.CORS_ORIGINS || "")
 const ALLOWED_ORIGINS = Array.from(
   new Set([...defaultOrigins, ...extraOrigins]),
 );
+
+function allowedOrigin(origin) {
+  if (!origin) return true; // curl/no-origin
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+
+  // allow all Vercel preview URLs
+  try {
+    const u = new URL(origin);
+    if (u.hostname.endsWith(".vercel.app")) return true;
+  } catch {}
+  return false;
+}
+
+function pickReturnBase(req) {
+  const origin = String(req.headers.origin || "").trim();
+  if (origin && allowedOrigin(origin)) return origin.replace(/\/$/, "");
+  return STRIPE_RETURN_URL;
+}
 
 // --------------------
 // Simple JSON DB
@@ -352,26 +194,7 @@ function firstDayNextMonthTs(ts = now()) {
   return new Date(y, m + 1, 1, 0, 0, 0, 0).getTime();
 }
 
-function randomId(prefix) {
-  const c = globalThis.crypto;
-  if (c?.getRandomValues) {
-    const b = new Uint8Array(8);
-    c.getRandomValues(b);
-    const hex = Array.from(b)
-      .map((x) => x.toString(16).padStart(2, "0"))
-      .join("");
-    return `${prefix}_${hex}`;
-  }
-  return `${prefix}_${Math.random().toString(16).slice(2)}${Math.random()
-    .toString(16)
-    .slice(2)}`.slice(0, 28);
-}
-
-const db = {
-  accounts: {}, // accountId -> account
-  customers: {}, // stripeCustomerId -> accountId
-};
-
+const db = { accounts: {}, customers: {} }; // customers: stripeCustomerId -> accountId
 let _saveTimer = null;
 
 function loadDb() {
@@ -404,11 +227,6 @@ function scheduleSave() {
   }, 250);
 }
 
-function stripeModeLabel() {
-  if (!stripe) return "DISABLED";
-  return STRIPE_SECRET_KEY.startsWith("sk_live") ? "LIVE" : "TEST";
-}
-
 function getOrCreateAccount(accountId, userId) {
   const id = String(accountId || "").trim();
   const uid = String(userId || "").trim() || "anon";
@@ -429,13 +247,9 @@ function getOrCreateAccount(accountId, userId) {
         cancelAt: 0,
         cancelAtPeriodEnd: false,
       },
-      usage: {
-        monthKey: monthKeyFromTs(),
-        used: 0,
-        boostUsed: 0,
-        lastTs: 0,
-      },
+      usage: { monthKey: monthKeyFromTs(), used: 0, boostUsed: 0, lastTs: 0 },
       trial: { events: [] },
+      apiKeyEnc: "", // optional: saved BYOK (encrypted) if you ever want it
     };
     scheduleSave();
   } else {
@@ -476,32 +290,14 @@ function getIds(req) {
 }
 
 function getApiKey(req) {
-  // accept both for backwards compatibility
+  // headers + body fallback
   return String(
     req.headers["x-gle-api-key"] ||
       req.headers["x-openai-key"] ||
       req.headers["x-api-key"] ||
+      req.body?.apiKey ||
       "",
   ).trim();
-}
-
-function allowedOrigin(origin) {
-  if (!origin) return true; // curl/no-origin
-  if (ALLOWED_ORIGINS.includes(origin)) return true;
-
-  // allow all Vercel preview URLs
-  try {
-    const u = new URL(origin);
-    if (u.hostname.endsWith(".vercel.app")) return true;
-  } catch {}
-
-  return false;
-}
-
-function pickReturnBase(req) {
-  const origin = String(req.headers.origin || "").trim();
-  if (origin && allowedOrigin(origin)) return origin.replace(/\/$/, "");
-  return STRIPE_RETURN_URL;
 }
 
 function normalizeStripeTs(sec) {
@@ -541,7 +337,6 @@ function computeCancelAt(account) {
 function enforceQuota(account, wantsBoost) {
   ensureMonthlyBucket(account);
   const isPro = planIsPro(account);
-
   const used = Number(account.usage.used || 0);
   const limit = isPro ? PRO_LIMIT : FREE_LIMIT;
 
@@ -606,7 +401,6 @@ function trialAllowed(account) {
       limit: TRIAL_LIMIT_24H,
     };
   }
-
   return { ok: true, used: fresh.length, limit: TRIAL_LIMIT_24H };
 }
 
@@ -616,6 +410,205 @@ function markTrial(account) {
   account.trial.events.unshift(now());
   account.trial.events = account.trial.events.slice(0, 50);
   scheduleSave();
+}
+
+// ===============================
+// BOUNCER v2 — server-side quality gate
+// ===============================
+const BOUNCER_ENABLED = String(process.env.BOUNCER_ENABLED || "0") === "1";
+const BOUNCER_MAX_PASSES = Math.max(
+  0,
+  Number(process.env.BOUNCER_MAX_PASSES || 0),
+);
+
+const REQUIRED_BANNED_STEMS = [
+  // meta/apology / "need more info"
+  "tutmirleid",
+  "bittegib",
+  "benoetig",
+  "mehrinformation",
+  "ichkann",
+  "imsorry",
+  "cantcomply",
+  "cannotcomply",
+];
+
+const DEFAULT_BANNED_STEMS = [
+  "optimier",
+  "steiger",
+  "verbesser",
+  "erleb",
+  "profit",
+  "verpass",
+  "chance",
+  "exklus",
+  "konkurrenz",
+  "agentur",
+  "erfolg",
+  "nutz",
+  "vorteil",
+  "vorsp",
+  "sicher",
+  "leader",
+  "luxus",
+  "strateg",
+];
+
+function _normalizeForScan(input) {
+  let s = String(input || "").toLowerCase();
+  s = s
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss");
+  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  return s;
+}
+
+function _splitEnvStems(envVal) {
+  const raw = String(envVal || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function _dedupeKeepOrder(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const x of arr) {
+    const key = String(x || "").trim();
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+function getActiveBannedStems() {
+  const fromEnv = _splitEnvStems(process.env.BOUNCER_BANNED_STEMS);
+  const base = fromEnv.length ? fromEnv : DEFAULT_BANNED_STEMS;
+  const combined = _dedupeKeepOrder([...base, ...REQUIRED_BANNED_STEMS]);
+  return _dedupeKeepOrder(
+    combined
+      .map((stem) => _normalizeForScan(stem).replace(/\s+/g, ""))
+      .filter(Boolean),
+  );
+}
+
+const ACTIVE_BANNED_STEMS = getActiveBannedStems();
+
+function findStemViolations(text, stems = ACTIVE_BANNED_STEMS) {
+  const hay = _normalizeForScan(text);
+  if (!hay) return [];
+  const hayCompact = hay.replace(/\s+/g, "");
+  const hits = [];
+  for (const stemRaw of stems) {
+    const stem = _normalizeForScan(stemRaw).replace(/\s+/g, "");
+    if (!stem) continue;
+    if (hayCompact.includes(stem)) hits.push(stem);
+  }
+  return _dedupeKeepOrder(hits);
+}
+
+// --------------------
+// CTA + Sanitizer (last mile)
+// --------------------
+function detectCtaLabelFromExtra(extra) {
+  const s = String(extra || "");
+  if (/CTA-Zeile/i.test(s)) return "CTA-Zeile";
+  if (/CTA\s*:/i.test(s)) return "CTA";
+  return null;
+}
+
+function normalizeCtaLabel(output, extra) {
+  const want = detectCtaLabelFromExtra(extra);
+  if (!want) return String(output || "");
+
+  return String(output || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const m = line.match(/^(\s*(?:\d+\)\s*)?)(CTA(?:-Zeile)?\s*:)(.*)$/i);
+      if (!m) return line;
+      return `${m[1]}${want}:${m[3] || ""}`;
+    })
+    .join("\n");
+}
+
+function forceNeutralCTA(output, extra) {
+  const allowed = [
+    "Zur Warteliste.",
+    "Early Access: Eintragen.",
+    "Warteliste öffnen.",
+  ];
+  const chosen = allowed[0];
+
+  const want = detectCtaLabelFromExtra(extra); // may be null
+  const out = String(output || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const m = line.match(/^(\s*(?:\d+\)\s*)?)(CTA(?:-Zeile)?\s*:)\s*(.*)$/i);
+      if (!m) return line;
+      const label = want ? `${want}:` : m[2];
+      return `${m[1]}${label} ${chosen}`;
+    })
+    .join("\n");
+
+  // If format expects CTA but model forgot it: append one line (safe fallback)
+  const expects =
+    /CTA-Zeile/i.test(String(extra || "")) ||
+    /CTA\s*:/i.test(String(extra || ""));
+  const hasCta = /(^|\n)\s*(\d+\)\s*)?CTA(?:-Zeile)?\s*:/i.test(out);
+  if (expects && !hasCta) {
+    const label = want ? `${want}:` : "CTA:";
+    return `${out}\n\n${label} ${chosen}`;
+  }
+  return out;
+}
+
+/**
+ * Hard sanitize the most frequent “hot stems” that keep tripping the bouncer,
+ * without asking the model again.
+ */
+function hardStripHotStems(output) {
+  let s = String(output || "");
+
+  // remove/replace common offenders (keep it simple and safe)
+  const repl = [
+    // nutz* family
+    [/\b(nutz\w*)\b/gi, "Content erstellen"],
+    // vorsprung / vorsp*
+    [/\b(vorsprung\w*)\b/gi, "klarer Schritt nach vorn"],
+    [/\b(vorsp\w*)\b/gi, "klarer Schritt nach vorn"],
+    // sicher*
+    [/\b(sicher\w*)\b/gi, "jetzt"],
+    // optimier/steiger/verbesser
+    [/\b(optimier\w*|steiger\w*|verbesser\w*)\b/gi, "reduzieren"],
+    // erfolg*
+    [/\b(erfolg\w*)\b/gi, "Ergebnis"],
+    // chance/verpass/profit/exklus/konkurrenz/agentur/leader/luxus/strateg
+    [
+      /\b(chanc\w*|verpass\w*|profit\w*|exklus\w*|konkurrenz\w*|agentur\w*|leader\w*|luxus\w*|strateg\w*)\b/gi,
+      "",
+    ],
+    // buzzwords you explicitly hate often
+    [/\b(hochwertig\w*|blitzschnell\w*|revolution\w*|premium\w*)\b/gi, ""],
+  ];
+
+  for (const [rx, to] of repl) s = s.replace(rx, to);
+
+  // clean extra spaces
+  s = s
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return s;
 }
 
 // --------------------
@@ -653,9 +646,8 @@ async function openaiResponses({ apiKey, model, input, temperature }) {
     throw new Error(String(msg));
   }
 
-  if (typeof data.output_text === "string" && data.output_text.trim()) {
+  if (typeof data.output_text === "string" && data.output_text.trim())
     return data.output_text.trim();
-  }
 
   const out = Array.isArray(data.output) ? data.output : [];
   for (const item of out) {
@@ -667,7 +659,6 @@ async function openaiResponses({ apiKey, model, input, temperature }) {
       }
     }
   }
-
   throw new Error("No text from OpenAI");
 }
 
@@ -733,79 +724,110 @@ async function callOpenAI({ apiKey, model, prompt, temperature }) {
 }
 
 // --------------------
+// Input mapping (THE FIX)
+// --------------------
+function normalizeInputs(body) {
+  const b = body || {};
+
+  const useCase = String(
+    b.useCase ?? b.use_case ?? b.uc ?? b.template ?? b.type ?? "",
+  ).trim();
+
+  const tone = String(b.tone ?? b.style ?? b.voice ?? "").trim();
+
+  // IMPORTANT: accept both topic/extra/outLang and goal/context/language
+  const topic = String(b.topic ?? b.goal ?? b.subject ?? b.title ?? "").trim();
+
+  const extra = String(
+    b.extra ?? b.context ?? b.instructions ?? b.prompt ?? "",
+  ).trim();
+
+  const outLangRaw = String(b.outLang ?? b.language ?? b.lang ?? "DE").trim();
+  const outLang = outLangRaw.toLowerCase() === "en" ? "en" : "de";
+
+  const boost = b.boost === true;
+
+  return { useCase, tone, topic, extra, outLang, boost };
+}
+
+// --------------------
 // Prompt builder
 // --------------------
 function buildMasterPrompt({ useCase, tone, topic, extra, outLang }) {
-  const lang =
-    (outLang || "DE").toString().toUpperCase() === "EN" ? "EN" : "DE";
+  const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
   const uc = String(useCase || "Allgemein").trim();
-  const t = String(tone || "Professionell").trim();
-
+  const t = String(tone || "Neutral").trim();
   const cleanTopic = String(topic || "").trim();
   const cleanExtra = String(extra || "").trim();
 
-  // 🔥 Production prompt: liefert fertigen Content (kein Master-Prompt / keine Templates)
   return `
-Du bist ein Elite-Copywriter für High-Performance SaaS (Creator & Solopreneure).
-Dein Job: Schreibe fertigen Content, der nach Premium klingt und sofort nutzbar ist.
+Du bist ein deutscher Copywriter. Du lieferst fertigen Content.
+Kein Meta, keine Rückfragen, keine Entschuldigungen.
 
-Zielsprache: ${lang}. Ton: ${t}.
-Use-Case: ${uc}.
+Zielsprache: ${lang}
+Use-Case: ${uc}
+Ton: ${t}
 
-HARD RULES (müssen eingehalten werden):
-1) KEIN GELABER: Keine Einleitung ("Hier sind..."), keine Erklärungen, keine Meta-Kommentare.
-2) KEINE PROMPT-WÖRTER: Schreibe niemals "Prompt", "Master-Prompt", "Input-Fragen", "Vorlage", "Template".
-3) KEIN TECH-TALK: Niemals BYOK, Server-Key, Modelle, Tokens, Boost, Trial erwähnen.
-4) KEINE PLATZHALTER: Keine Klammern, keine Variablen wie [ZIELGRUPPE], keine Fragen an den User.
-5) KONKRET statt FLUFF: Keine leeren Claims ohne konkreten Nutzen.
-6) JE VARIANTE anderer psychologischer Winkel:
-   - Variante 1 (Logik/ROI): Zeitgewinn, messbarer Nutzen (wenn möglich Zahlen).
-   - Variante 2 (Status/Brand): Außenwirkung, Professionalität, wirkt wie Agentur-Niveau.
-   - Variante 3 (FOMO): Vorsprung, Exklusivität, Risiko abgehängt zu werden.
-7) Emojis: maximal 1 pro Variante, nur minimalistisch (⚡ 📈 💎 oder →). Keine Smileys.
-8) PUNCH: aktive Verben. Keine Weichmacher wie "kannst", "solltest", "würde", "helfen", "versuchen".
-9) HOOK-REGEL (STRIKT):
-- Länge: Maximal 12 Wörter.
-- Hook startet IMMER mit Nutzen/Schmerz/Zahl/FOMO – NICHT mit Produktname.
-- Hook ohne Ausrufezeichen. Eiskalt, präzise.
-10) BULLET-REGEL (BEWEISPFLICHT):
-- Jede Bullet MUSS mindestens 1 Proof-Element enthalten: (Zahl ODER Zeit ODER klarer Output-Baustein).
-- Wenn eine Bullet kein Proof-Element enthält: Bullet verwerfen und neu schreiben.
-11) ANTI-FLOSKEL: Wenn es auch von 1.000 Tools stammen könnte, ist es verboten.
+HARTE REGELN:
+- Keine Einleitungssätze (“Hier ist…”, “Gerne…”, “Es tut mir leid…”).
+- Keine Sie-Ansprache. Nutze “du” ODER neutral ohne Pronomen.
+- Keine Emojis.
+- Keine Buzzwords/Floskeln (z.B. “hochwertig”, “ohne Aufwand”, “Premium”, “revolutionär”).
+- Schreibe konkret: was + für wen + Ergebnis, in einfachen Worten.
+- Halte CTA neutral (keine Imperative wie “Sichere dir…”).
 
-AUFGABE:
-Erzeuge den fertigen Output direkt – basierend auf den Infos unten.
-
-THEMA / KONTEXT:
+THEMA:
 ${cleanTopic || "(kein Thema angegeben)"}
 
-EXTRA HINWEISE (falls vorhanden):
-${cleanExtra || "(keine Extra Hinweise)"}
+FORMAT / Anforderungen:
+${cleanExtra || "(kein Format vorgegeben)"}
 
-FORMAT (exakt so ausgeben, copy/paste-fertig):
-Variante 1
-Hook: ...
-- ...
-- ...
-- ...
-CTA: ...
-Link in Bio
+Gib ausschließlich den fertigen Output aus.
+`.trim();
+}
 
-Variante 2
-Hook: ...
-- ...
-- ...
-- ...
-CTA: ...
-Link in Bio
+function buildRepairPrompt({
+  badOutput,
+  hits,
+  useCase,
+  tone,
+  topic,
+  extra,
+  outLang,
+}) {
+  const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
+  const bannedAll =
+    Array.isArray(ACTIVE_BANNED_STEMS) && ACTIVE_BANNED_STEMS.length
+      ? ACTIVE_BANNED_STEMS.join(", ")
+      : "";
+  const hitList = Array.isArray(hits) && hits.length ? hits.join(", ") : "";
 
-Variante 3
-Hook: ...
-- ...
-- ...
-- ...
-CTA: ...
-Link in Bio
+  return `
+Du bist strenger Copy-Editor. Du lieferst FERTIGEN Content – kein Meta, keine Entschuldigungen.
+Zielsprache: ${lang}
+Use-Case: ${useCase}
+Ton: ${tone}
+Thema: ${topic}
+
+QUALITY GATE (hart):
+1) Schreibe KOMPLETT NEU. Nicht umformulieren, nichts wiederverwenden.
+2) Keine Einleitungssätze, keine Erklärungen, kein “Hier ist…”.
+3) Keine Entschuldigungen / kein “mir fehlen Infos” / kein “I can’t…”.
+4) Keine Floskeln & kein Marketing-Pathos. Kurz, klar, konkret.
+5) Keine Sie-Ansprache. Nutze “du” ODER neutral ohne Pronomen.
+6) VERBOTEN: In deiner finalen Antwort darf KEIN Wortteil aus dieser Liste vorkommen:
+${bannedAll || "(leer)"}
+7) Treffer im letzten Output waren: ${hitList || "(keine)"} — diese müssen weg.
+8) CTA neutral halten. Kein “Sichere dir…”, kein “Jetzt anmelden…”, kein Imperativ.
+9) Wenn ein verbotener Stamm vorkommt: komplett neu schreiben. Nicht erwähnen.
+
+FORMAT / Anforderungen (exakt einhalten):
+${extra}
+
+Alter Output (nur zur Analyse, NICHT wiederverwenden):
+"""
+${String(badOutput || "").slice(0, 2000)}
+"""
 `.trim();
 }
 
@@ -894,7 +916,6 @@ app.post(
             "unpaid",
           ].includes(String(sub.status || ""));
           if (stillActive) acc.plan = "PRO";
-
           scheduleSave();
         }
       }
@@ -903,7 +924,6 @@ app.post(
         const sub = obj;
         const customerId = String(sub.customer || "");
         const acc = getAccountByCustomer(customerId);
-
         if (acc) {
           acc.stripe.status = "canceled";
           acc.stripe.cancelAtPeriodEnd = false;
@@ -940,8 +960,17 @@ app.use(
     ],
   }),
 );
-
 app.use(express.json({ limit: "1mb" }));
+
+// If CORS blocks, return JSON (not HTML)
+app.use((err, req, res, next) => {
+  if (err && String(err.message || "").startsWith("CORS blocked:")) {
+    return res
+      .status(403)
+      .json({ ok: false, error: "cors_blocked", message: err.message });
+  }
+  return next(err);
+});
 
 // --------------------
 // Routes
@@ -1001,6 +1030,40 @@ app.get("/api/me", (req, res) => {
   }
 });
 
+// Admin: set plan without DB editing
+app.post("/api/admin/set-plan", (req, res) => {
+  try {
+    if (!ADMIN_KEY)
+      return res.status(500).json({ ok: false, error: "admin_not_configured" });
+    const key = String(
+      req.headers["x-admin-key"] || req.body?.adminKey || "",
+    ).trim();
+    if (!key || key !== ADMIN_KEY)
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+
+    const accountId = String(req.body?.accountId || "").trim();
+    const plan = String(req.body?.plan || "")
+      .trim()
+      .toUpperCase();
+    if (!accountId)
+      return res.status(400).json({ ok: false, error: "missing_account_id" });
+    if (plan !== "PRO" && plan !== "FREE")
+      return res.status(400).json({ ok: false, error: "bad_plan" });
+
+    const acc = getOrCreateAccount(accountId, "admin");
+    acc.plan = plan;
+    acc.updatedAt = new Date().toISOString();
+    scheduleSave();
+    return res.json({ ok: true, accountId, plan });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      error: "admin_failed",
+      message: String(e?.message || e),
+    });
+  }
+});
+
 app.post("/api/test", async (req, res) => {
   try {
     const key = getApiKey(req);
@@ -1024,12 +1087,10 @@ app.post("/api/test", async (req, res) => {
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
-
-    if (!stripe || !STRIPE_PRICE_ID) {
+    if (!stripe || !STRIPE_PRICE_ID)
       return res
         .status(500)
         .json({ ok: false, error: "stripe_not_configured" });
-    }
 
     const { userId, accountId } = getIds(req);
     if (!accountId)
@@ -1066,7 +1127,6 @@ app.post("/api/create-checkout-session", async (req, res) => {
 app.post("/api/sync-checkout-session", async (req, res) => {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
-
     if (!stripe)
       return res
         .status(500)
@@ -1131,7 +1191,6 @@ app.post("/api/sync-checkout-session", async (req, res) => {
 async function handlePortalSession(req, res) {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
-
     if (!stripe)
       return res
         .status(500)
@@ -1142,9 +1201,8 @@ async function handlePortalSession(req, res) {
       return res.status(400).json({ ok: false, error: "missing_account_id" });
 
     const acc = getOrCreateAccount(accountId, userId);
-    if (!acc.stripe?.customerId) {
+    if (!acc.stripe?.customerId)
       return res.status(400).json({ ok: false, error: "missing_customer_id" });
-    }
 
     const base = pickReturnBase(req);
     const returnUrl = `${base}/?from=billing`;
@@ -1171,6 +1229,9 @@ app.post("/api/create-portal-session", handlePortalSession); // alias/fallback
 // Generate
 app.post("/api/generate", async (req, res) => {
   try {
+    console.log("GLE_GENERATE_MARKER:", process.env.BUILD_TAG || "no-tag");
+    res.setHeader("x-gle-build", String(process.env.BUILD_TAG || "no-tag"));
+
     const { userId, accountId } = getIds(req);
     if (!accountId)
       return res.status(400).json({ ok: false, error: "missing_account_id" });
@@ -1187,25 +1248,16 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    // Inputs
-    const useCase = String(req.body?.useCase || "").trim();
-    const tone = String(req.body?.tone || "").trim();
-    const topic = String(req.body?.topic || "").trim();
-    const extra = String(req.body?.extra || "").trim();
-    const outLang =
-      String(req.body?.outLang || "de")
-        .trim()
-        .toLowerCase() === "en"
-        ? "en"
-        : "de";
-    const wantsBoost = req.body?.boost === true;
+    const { useCase, tone, topic, extra, outLang, boost } = normalizeInputs(
+      req.body,
+    );
+    const wantsBoost = boost === true;
 
     ensureMonthlyBucket(acc);
 
     const byokKey = getApiKey(req);
     const isPro = planIsPro(acc);
 
-    // If BYOK_ONLY: must have byokKey
     if (BYOK_ONLY && !byokKey) {
       return res.status(400).json({
         ok: false,
@@ -1214,11 +1266,13 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    // Decide key/mode + model
+    // --------------------
+    // Decide key/mode + INTERNAL model
+    // --------------------
     let mode = "BYOK"; // BYOK | PRO_SERVER | TRIAL_SERVER
     let apiKeyToUse = byokKey;
 
-    // model by plan/boost (ENV-driven)
+    // Intern: echtes Modell (nie im UI anzeigen!)
     let modelToUse = wantsBoost ? MODEL_BOOST : isPro ? MODEL_PRO : MODEL_BYOK;
 
     if (!byokKey) {
@@ -1231,7 +1285,7 @@ app.post("/api/generate", async (req, res) => {
         if (tr.ok && SERVER_OPENAI_KEY) {
           mode = "TRIAL_SERVER";
           apiKeyToUse = SERVER_OPENAI_KEY;
-          modelToUse = MODEL_PRO; // trial runs non-boost
+          modelToUse = MODEL_PRO;
           markTrial(acc);
         } else {
           return res.status(400).json({
@@ -1240,12 +1294,26 @@ app.post("/api/generate", async (req, res) => {
             message:
               "No BYOK key set. Start checkout (PRO) or set your OpenAI API key.",
             trial: tr,
+            mode,
+            model: ENGINE_BYOK, // UI-Label
           });
         }
       }
     }
 
+    // --------------------
+    // PUBLIC engine label (UI) – NIE echte Modellnamen
+    // --------------------
+    let engineLabel;
+    if (wantsBoost) engineLabel = ENGINE_ULTRA;
+    else if (byokKey) engineLabel = ENGINE_BYOK;
+    else if (mode === "TRIAL_SERVER") engineLabel = ENGINE_TRIAL;
+    else if (mode === "PRO_SERVER") engineLabel = ENGINE_PRO;
+    else engineLabel = ENGINE_BYOK;
+
+    // --------------------
     // Quota
+    // --------------------
     const quota = enforceQuota(acc, wantsBoost);
     if (!quota.ok) {
       return res.status(429).json({
@@ -1256,21 +1324,36 @@ app.post("/api/generate", async (req, res) => {
         renewAt: quota.renewAt,
         boostUsed: quota.boostUsed,
         boostLimit: quota.boostLimit,
+        mode,
+        model: engineLabel, // UI-Label
       });
     }
 
-    // Build instruction prompt
-    const prompt = buildMasterPrompt({ useCase, tone, topic, extra, outLang });
+    // --------------------
+    // Build prompt
+    // --------------------
+    const prompt = buildMasterPrompt({
+      useCase,
+      tone,
+      topic,
+      extra,
+      outLang,
+      boost: wantsBoost,
+    });
 
-    // 1) First pass
+    // --------------------
+    // 1) First pass (OpenAI bekommt IMMER modelToUse)
+    // --------------------
     let output = await callOpenAI({
       apiKey: apiKeyToUse,
-      model: modelToUse,
+      model: modelToUse, // ✅ wichtig
       prompt,
       temperature: 0.6,
     });
 
-    // 2) Server-side Bouncer: detect banned stems → rewrite loop
+    // --------------------
+    // 2) Bouncer rewrite loop (OpenAI bekommt IMMER modelToUse)
+    // --------------------
     if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
       for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
         const hits = findStemViolations(output);
@@ -1288,32 +1371,69 @@ app.post("/api/generate", async (req, res) => {
 
         output = await callOpenAI({
           apiKey: apiKeyToUse,
-          model: modelToUse,
+          model: modelToUse, // ✅ wichtig
           prompt: repair,
-          temperature: 0.2,
+          temperature: 0.0,
         });
       }
     }
 
-    const finalHits = BOUNCER_ENABLED ? findStemViolations(output) : [];
-    if (BOUNCER_ENABLED && finalHits.length) {
-      return res.status(422).json({
-        ok: false,
-        error: "banned_words",
-        banned: finalHits,
-        mode,
-        model: modelToUse,
-      });
-    }
+    // ✅ last-mile enforcement
+    output = normalizeCtaLabel(output, extra);
+    output = forceNeutralCTA(output, extra);
+    output = hardStripHotStems(output);
 
-    // mark usage after success
+    // --------------------
+    // FINAL: Soft-Stems + Phrase-Fixes (auch wenn Bouncer aus ist)
+    // --------------------
+    output = sanitizeSoftStems(output, DEFAULT_BANNED_STEMS);
+
+    output = output
+      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "") // DE/EN
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .trim();
+
+    // Nur HARD darf 422
+    if (BOUNCER_ENABLED) {
+      const { hard } = findViolations(output, DEFAULT_BANNED_STEMS);
+      if (hard.length) {
+        return res.status(422).json({
+          ok: false,
+          error: "hard_violations",
+          hard,
+          mode,
+          model: engineLabel, // UI-Label
+        });
+      }
+    }
     markUsage(acc, wantsBoost);
+
+    // --------------------
+    // LAST LINE DEFENSE (UI + Output clean)
+    // --------------------
+    const publicModel = wantsBoost
+      ? ENGINE_ULTRA
+      : mode === "TRIAL_SERVER"
+        ? ENGINE_TRIAL
+        : mode === "PRO_SERVER"
+          ? ENGINE_PRO
+          : ENGINE_BYOK;
+
+    output = String(output || "")
+      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+      .replace(/\blink\s+in\s+bio\b/gi, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .trim();
 
     return res.json({
       ok: true,
       output,
       mode,
-      model: modelToUse,
+      model: publicModel, // ✅ NIE mehr gpt-...
       plan: isPro ? "PRO" : "FREE",
       used: acc.usage.used,
       limit: isPro ? PRO_LIMIT : FREE_LIMIT,
@@ -1330,20 +1450,4 @@ app.post("/api/generate", async (req, res) => {
       message: e?.message || String(e),
     });
   }
-});
-
-app.get("/", (req, res) => {
-  res.type("text/plain").send("GLE Prompt Studio Backend OK");
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ GLE backend running on :${PORT}`);
-  console.log(`CORS allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
-  console.log(
-    `BYOK_ONLY=${BYOK_ONLY ? "1" : "0"} TRIAL_ENABLED=${TRIAL_ENABLED ? "1" : "0"}`,
-  );
-  console.log(
-    `BOUNCER_ENABLED=${String(process.env.BOUNCER_ENABLED || "0")} BOUNCER_MAX_PASSES=${String(process.env.BOUNCER_MAX_PASSES || "0")}`,
-  );
-  console.log(`DB: ${DB_FILE}`);
 });
