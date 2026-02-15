@@ -280,13 +280,20 @@ function attachCustomerToAccount(account, customerId) {
 // Request helpers
 // --------------------
 function getIds(req) {
-  const userId =
-    String(req.headers["x-gle-user"] || req.body?.userId || "").trim() ||
-    "anon";
+  const h = req.headers || {};
+
   const accountId = String(
-    req.headers["x-gle-account-id"] || req.body?.accountId || "",
+    h["x-gle-account-id"] || h["x-gle-accountid"] || h["x-account-id"] || "",
   ).trim();
-  return { userId, accountId };
+
+  const userId = String(
+    h["x-gle-user-id"] ||
+      h["x-gle-user"] || // ✅ fallback für deinen aktuellen Frontend-Bug
+      h["x-user-id"] ||
+      "",
+  ).trim();
+
+  return { accountId, userId };
 }
 
 function getApiKey(req) {
@@ -1304,12 +1311,19 @@ app.post("/api/generate", async (req, res) => {
     // --------------------
     // PUBLIC engine label (UI) – NIE echte Modellnamen
     // --------------------
-    let engineLabel;
-    if (wantsBoost) engineLabel = ENGINE_ULTRA;
-    else if (byokKey) engineLabel = ENGINE_BYOK;
-    else if (mode === "TRIAL_SERVER") engineLabel = ENGINE_TRIAL;
-    else if (mode === "PRO_SERVER") engineLabel = ENGINE_PRO;
-    else engineLabel = ENGINE_BYOK;
+    const engineLabel = wantsBoost
+      ? ENGINE_ULTRA
+      : byokKey
+        ? ENGINE_BYOK
+        : mode === "TRIAL_SERVER"
+          ? ENGINE_TRIAL
+          : mode === "PRO_SERVER"
+            ? ENGINE_PRO
+            : ENGINE_BYOK;
+
+    // Debug-Header (hilft dir sofort zu sehen was läuft)
+    res.setHeader("x-gle-engine", engineLabel);
+    res.setHeader("x-gle-model", modelToUse);
 
     // --------------------
     // Quota
@@ -1325,7 +1339,7 @@ app.post("/api/generate", async (req, res) => {
         boostUsed: quota.boostUsed,
         boostLimit: quota.boostLimit,
         mode,
-        model: engineLabel, // UI-Label
+        model: engineLabel, // ✅ UI-Label
       });
     }
 
@@ -1384,31 +1398,47 @@ app.post("/api/generate", async (req, res) => {
     output = hardStripHotStems(output);
 
     // --------------------
-    // FINAL: Soft-Stems + Phrase-Fixes (auch wenn Bouncer aus ist)
+    // FINAL CLEAN (IMMER) – Link in Bio / Whitespace
     // --------------------
-    output = sanitizeSoftStems(output, DEFAULT_BANNED_STEMS);
-
-    output = output
-      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "") // DE/EN
+    output = String(output || "")
+      // ganze Zeile killen (egal ob groß/klein, mit Leerzeichen)
+      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
+      // inline killen
+      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
       .replace(/\n{3,}/g, "\n\n")
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+([,.;:!?])/g, "$1")
       .trim();
 
-    // Nur HARD darf 422
-    if (BOUNCER_ENABLED) {
+    // Nur HARD darf 422 (wenn du findViolations nutzt)
+    if (BOUNCER_ENABLED && typeof findViolations === "function") {
       const { hard } = findViolations(output, DEFAULT_BANNED_STEMS);
-      if (hard.length) {
+      if (hard && hard.length) {
         return res.status(422).json({
           ok: false,
           error: "hard_violations",
           hard,
           mode,
-          model: engineLabel, // UI-Label
+          model: engineLabel, // ✅ UI-Label
         });
       }
     }
+
     markUsage(acc, wantsBoost);
+
+    return res.json({
+      ok: true,
+      output,
+      mode,
+      model: engineLabel, // ✅ NIE mehr gpt-...
+      plan: isPro ? "PRO" : "FREE",
+      used: acc.usage.used,
+      limit: isPro ? PRO_LIMIT : FREE_LIMIT,
+      boostUsed: acc.usage.boostUsed,
+      boostLimit: PRO_BOOST_LIMIT,
+      renewAt: computeRenewAt(acc),
+      cancelAt: computeCancelAt(acc),
+    });
 
     // --------------------
     // LAST LINE DEFENSE (UI + Output clean)
