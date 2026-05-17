@@ -1020,11 +1020,39 @@ function extractJsonObject(text) {
 }
 
 function cleanLine(value, fallback = "") {
-  return String(value || fallback)
+  let s = String(value || fallback)
     .replace(/\*\*/g, "")
     .replace(/^\s*[-•]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  // Landingpage/SaaS: harte Anti-Floskel-Glättung
+  s = s
+    .replace(/\bmühelos\b/gi, "klar")
+    .replace(/\bohne Aufwand\b/gi, "ohne Umwege")
+    .replace(/\bim Handumdrehen\b/gi, "schneller")
+    .replace(/\bauf Knopfdruck\b/gi, "mit wenigen Eingaben")
+    .replace(/\bperfekt für\b/gi, "geeignet für")
+    .replace(/\bperfekt\b/gi, "passend")
+    .replace(/\binnovativ\b/gi, "klar strukturiert")
+    .replace(/\bhochwertig\b/gi, "klar")
+    .replace(/\bPremium\b/gi, "PRO")
+    .replace(/\bHohe Qualität\b/gi, "Konsistentere Textqualität")
+    .replace(/\bhohe Qualität\b/gi, "konsistentere Textqualität")
+    .replace(/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust")
+    .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
+    .replace(
+      /\bContent in Sekunden generieren\b/gi,
+      "Content schneller strukturieren",
+    )
+    .replace(/\bSchnelle Erstellung\b/gi, "Strukturierte Erstellung")
+    .replace(/\bjetzt anmelden\b/gi, "zur Warteliste")
+    .replace(/\bSichere dir\b/gi, "Zur Warteliste")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  return s;
 }
 
 function renderLandingpageOutput(data) {
@@ -1096,9 +1124,15 @@ function buildLandingpageJsonPrompt({ useCase, tone, topic, extra, outLang }) {
   const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
 
   return `
-Du bist ein deutscher SaaS-Copywriter.
-Erstelle KEINEN Markdown-Text.
+Du bist ein präziser SaaS-Copywriter für digitale Tools.
+Du schreibst klare, ruhige, verkaufbare Texte ohne Hype.
+
+WICHTIG:
 Gib ausschließlich gültiges JSON aus.
+Kein Markdown.
+Keine Einleitung.
+Keine Kommentare.
+Keine Erklärungen außerhalb des JSON.
 
 Zielsprache: ${lang}
 Use-Case: ${useCase}
@@ -1110,34 +1144,69 @@ ${topic}
 ANFORDERUNGEN:
 ${extra}
 
+AUFGABE:
+Erstelle eine SaaS-Hero-Sektion für Early Access / Warteliste.
+
+Der Text soll:
+- konkret sagen, was das Tool macht
+- klar sagen, für wen es gedacht ist
+- den Zeitgewinn und die bessere Struktur erklären
+- Social Posts, Ads und Landingpages erwähnen, wenn passend
+- natürlich klingen, nicht nach Werbefloskel
+- ruhig, klar und professionell wirken
+
+VERBOTENE FORMULIERUNGEN:
+- mühelos
+- ohne Aufwand
+- im Handumdrehen
+- auf Knopfdruck
+- perfekt
+- revolutionär
+- innovativ
+- hochwertig
+- Premium
+- magisch
+- garantiert
+- sichere dir
+- jetzt anmelden
+- Link in Bio
+- Content erstellen als Satzfragment
+- Wer kann ... Content erstellen?
+
+SPRACHREGELN:
+- Keine Sie-Ansprache.
+- Verwende "du" nur sparsam.
+- Keine Emojis.
+- Keine technischen Begriffe wie GPT, API, Modell, BYOK, Tokens.
+- Keine übertriebenen Versprechen.
+- Keine leeren Claims.
+- Jeder Bulletpoint muss einen konkreten Produktbezug haben.
+- FAQ-Fragen müssen natürlich und vollständig sein.
+- Antworten müssen vollständige Sätze sein.
+
 JSON-SCHEMA:
 {
-  "headline": "maximal 9 Wörter",
-  "subheadline": "ein natürlicher Satz",
+  "headline": "maximal 9 Wörter, konkreter Nutzen, kein Punkt am Ende",
+  "subheadline": "ein natürlicher Satz: was das Tool macht + für wen",
   "bullets": [
-    "vollständiger Bulletpoint 1",
-    "vollständiger Bulletpoint 2",
-    "vollständiger Bulletpoint 3",
-    "vollständiger Bulletpoint 4",
-    "vollständiger Bulletpoint 5"
+    "konkreter Bulletpoint mit Produktbezug",
+    "konkreter Bulletpoint mit Produktbezug",
+    "konkreter Bulletpoint mit Produktbezug",
+    "konkreter Bulletpoint mit Produktbezug",
+    "konkreter Bulletpoint mit Produktbezug"
   ],
-  "cta": "kurze neutrale CTA",
+  "cta": "kurze neutrale CTA, z.B. Zur Warteliste.",
   "faq": [
-    { "q": "Frage 1", "a": "Antwort 1 als vollständiger Satz" },
-    { "q": "Frage 2", "a": "Antwort 2 als vollständiger Satz" },
-    { "q": "Frage 3", "a": "Antwort 3 als vollständiger Satz" }
+    { "q": "Was ist GLE Prompt Studio?", "a": "Antwort als vollständiger Satz." },
+    { "q": "Für wen ist GLE Prompt Studio gedacht?", "a": "Antwort als vollständiger Satz." },
+    { "q": "Was kostet GLE Prompt Studio später?", "a": "Antwort als vollständiger Satz." }
   ]
 }
 
-REGELN:
-- Nur gültiges JSON.
-- Keine Markdown-Zeichen.
-- Keine Sternchen.
-- Keine Einleitung.
-- Keine Sie-Ansprache.
-- Kein "Link in Bio".
-- Keine technischen Begriffe wie GPT, API, Modell, BYOK.
-- Natürlich, klar, verkaufbar.
+QUALITÄTSZIEL:
+Der Output soll wie eine echte SaaS-Landingpage klingen, nicht wie ein generischer KI-Text.
+
+Gib nur gültiges JSON aus.
 `.trim();
 }
 
@@ -1901,10 +1970,14 @@ Gib nur den finalen reparierten Content aus.
     } else {
       res.setHeader("x-gle-social", "0");
 
-      // last-mile only for NON-social
-      output = normalizeCtaLabel(output, extra);
-      output = forceNeutralCTA(output, extra);
-      output = hardStripHotStems(output);
+      // Landingpage/SaaS läuft bereits über JSON -> Renderer.
+      // Nicht mehr durch den alten Hot-Stem-Sanitizer jagen,
+      // sonst entstehen kaputte Sätze wie "Was kostet die verwenden?"
+      if (!isLandingPage) {
+        output = normalizeCtaLabel(output, extra);
+        output = forceNeutralCTA(output, extra);
+        output = hardStripHotStems(output);
+      }
     }
 
     // Final clean (do NOT flatten lines)
