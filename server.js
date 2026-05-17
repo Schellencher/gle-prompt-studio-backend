@@ -1026,28 +1026,75 @@ function cleanLine(value, fallback = "") {
     .replace(/\s+/g, " ")
     .trim();
 
-  // Landingpage/SaaS: harte Anti-Floskel-Glättung
+  // Harte SaaS/PRO-Glättung für Landingpage-Renderer
   s = s
-    .replace(/\bmühelos\b/gi, "klar")
-    .replace(/\bohne Aufwand\b/gi, "ohne Umwege")
+    // harte Hype-Wörter / Stämme
+    .replace(/\brevolution\w*\b/gi, "strukturiert")
+    .replace(/\bblitzschnell\w*\b/gi, "schnell")
+    .replace(/\bmagisch\w*\b/gi, "klar")
+    .replace(/\bpremium\w*\b/gi, "PRO")
+    .replace(/\bhochwertig\w*\b/gi, "klar")
+    .replace(/\binnovativ\w*\b/gi, "klar strukturiert")
+    .replace(/\bperfekt\b/gi, "geeignet")
+    .replace(/\bperfekt für\b/gi, "geeignet für")
+    .replace(/\bgarantiert\w*\b/gi, "")
+
+    // typische Floskeln
+    .replace(/\bohne großen Aufwand\b/gi, "ohne unnötige Umwege")
+    .replace(/\bohne Aufwand\b/gi, "ohne unnötige Umwege")
     .replace(/\bim Handumdrehen\b/gi, "schneller")
     .replace(/\bauf Knopfdruck\b/gi, "mit wenigen Eingaben")
-    .replace(/\bperfekt für\b/gi, "geeignet für")
-    .replace(/\bperfekt\b/gi, "passend")
-    .replace(/\binnovativ\b/gi, "klar strukturiert")
-    .replace(/\bhochwertig\b/gi, "klar")
-    .replace(/\bPremium\b/gi, "PRO")
-    .replace(/\bHohe Qualität\b/gi, "Konsistentere Textqualität")
-    .replace(/\bhohe Qualität\b/gi, "konsistentere Textqualität")
-    .replace(/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust")
-    .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
+    .replace(/\bmühelos\b/gi, "klar")
+    .replace(/\bansprechende\b/gi, "klare")
+    .replace(/\beffektive\b/gi, "gezielte")
+
+    // bessere SaaS-Formulierungen
+    .replace(
+      /\bGLE Prompt Studio strukturiert die Content-Erstellung\b/gi,
+      "GLE Prompt Studio strukturiert Social Posts, Ads und Landingpages",
+    )
+    .replace(
+      /\bGLE Prompt Studio liefert schnell\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+    )
+    .replace(
+      /\bContent in Sekunden erstellen\b/gi,
+      "Content schneller strukturieren",
+    )
     .replace(
       /\bContent in Sekunden generieren\b/gi,
       "Content schneller strukturieren",
     )
     .replace(/\bSchnelle Erstellung\b/gi, "Strukturierte Erstellung")
-    .replace(/\bjetzt anmelden\b/gi, "zur Warteliste")
+    .replace(/\bErstelle schnell\b/gi, "Erstelle strukturiert")
+    .replace(/\bGeneriere\b/gi, "Erstelle")
+    .replace(/\bDesigne\b/gi, "Entwirf")
+    .replace(/\bautomatisierte Prozesse\b/gi, "klare Workflows")
+    .replace(/\bHohe Qualität\b/gi, "Konsistentere Textqualität")
+    .replace(/\bhohe Qualität\b/gi, "konsistentere Textqualität")
+    .replace(/\bMinimale Zeitverluste\b/gi, "Weniger Zeitverlust")
+    .replace(/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust")
+    .replace(/\bReduziere Zeitverlust\b/gi, "Reduziert Zeitverlust")
+    .replace(/\bContent-Produktion\b/gi, "Content-Erstellung")
+    .replace(/\bContent-Erstellung\b/gi, "Content-Erstellung")
+
+    // CTA sauber/neutral
+    .replace(/\bjetzt zur Warteliste anmelden\b/gi, "zur Warteliste")
+    .replace(/\bJetzt eintragen\b/gi, "Zur Warteliste")
     .replace(/\bSichere dir\b/gi, "Zur Warteliste")
+
+    // kaputte Fragmente
+    .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
+    .replace(
+      /\bWer kann .* Inhalte erstellen\?/gi,
+      "Für wen ist GLE Prompt Studio gedacht?",
+    )
+    .replace(
+      /\bWer kann .* Content erstellen\?/gi,
+      "Für wen ist GLE Prompt Studio gedacht?",
+    )
+
+    // Whitespace
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
