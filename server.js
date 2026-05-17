@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * GLE Prompt Studio Backend — CLEAN FINAL (v2)
+ * GLE Prompt Studio Backend — CLEAN FINAL (v2.2)
  *
  * Features:
  * - BYOK + PRO(Server-Key) + optional BYOK_ONLY
@@ -10,16 +10,19 @@
  * - Stripe Checkout (Subscription) + Sync via session_id + Billing Portal
  * - Stripe Webhook handling (checkout.session.completed, customer.subscription.*)
  * - JSON file DB (Render persistent disk friendly via DATA_DIR)
- * - CORS allowlist (studio.getlaunchedge.com + vercel preview + ENV override)
+ * - CORS allowlist (studio.getlaunchedge.com + scoped Vercel previews + ENV override)
  * - OpenAI call: Responses API + fallback Chat Completions
  * - Server-side Bouncer: banned stems scan + rewrite passes + hard fail 422
- * - ✅ CTA normalizer + neutral CTA enforcement + hot-stem sanitizer
+ * - CTA normalizer + neutral CTA enforcement + hot-stem sanitizer (NON-social only)
+ * - Social Media Post: strict 6-line validator + deterministic fallback
  * - Admin endpoint: set plan PRO/FREE via ADMIN_KEY
  */
 
+"use strict";
+require("dotenv").config();
+
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const Stripe = require("stripe");
@@ -46,6 +49,7 @@ const DATA_DIR =
 const DB_FILE = path.join(DATA_DIR, "gle-db.json");
 
 const BYOK_ONLY = String(process.env.BYOK_ONLY || "0") === "1";
+
 // --------------------
 // OpenAI / Models
 // --------------------
@@ -136,29 +140,56 @@ function denyBilling(res) {
 // --------------------
 // CORS
 // --------------------
-const defaultOrigins = [
-  "https://studio.getlaunchedge.com",
-  "https://gle-prompt-studio.vercel.app",
-];
-const extraOrigins = String(process.env.CORS_ORIGINS || "")
+const defaultOrigins = Array.from(
+  new Set(
+    [
+      "https://studio.getlaunchedge.com",
+      "https://gle-prompt-studio.vercel.app",
+      FRONTEND_URL,
+    ].filter(Boolean),
+  ),
+);
+
+const extraOriginsRaw = String(
+  process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "",
+).trim();
+
+const extraOrigins = extraOriginsRaw
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+
+const VERCEL_PROJECT_SLUG = String(
+  process.env.VERCEL_PROJECT_SLUG || "gle-prompt-studio",
+)
+  .trim()
+  .toLowerCase();
 
 const ALLOWED_ORIGINS = Array.from(
   new Set([...defaultOrigins, ...extraOrigins]),
 );
 
-function allowedOrigin(origin) {
-  if (!origin) return true; // curl/no-origin
-  if (ALLOWED_ORIGINS.includes(origin)) return true;
-
-  // allow all Vercel preview URLs
+function isAllowedVercelPreview(origin) {
   try {
     const u = new URL(origin);
-    if (u.hostname.endsWith(".vercel.app")) return true;
-  } catch {}
-  return false;
+    if (u.protocol !== "https:") return false;
+
+    const host = u.hostname.toLowerCase();
+    if (!host.endsWith(".vercel.app")) return false;
+
+    return (
+      host === `${VERCEL_PROJECT_SLUG}.vercel.app` ||
+      host.startsWith(`${VERCEL_PROJECT_SLUG}-`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function allowedOrigin(origin) {
+  if (!origin) return true; // curl / server-to-server
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  return isAllowedVercelPreview(origin);
 }
 
 function pickReturnBase(req) {
@@ -227,6 +258,30 @@ function scheduleSave() {
   }, 250);
 }
 
+function syncStripeMode(account) {
+  if (!account) return;
+
+  if (!account.stripe) {
+    account.stripe = {
+      mode: stripeModeLabel(),
+      customerId: "",
+      subscriptionId: "",
+      status: "",
+      currentPeriodEnd: 0,
+      cancelAt: 0,
+      cancelAtPeriodEnd: false,
+    };
+    scheduleSave();
+    return;
+  }
+
+  const currentMode = stripeModeLabel();
+  if (account.stripe.mode !== currentMode) {
+    account.stripe.mode = currentMode;
+    scheduleSave();
+  }
+}
+
 function getOrCreateAccount(accountId, userId) {
   const id = String(accountId || "").trim();
   const uid = String(userId || "").trim() || "anon";
@@ -249,15 +304,15 @@ function getOrCreateAccount(accountId, userId) {
       },
       usage: { monthKey: monthKeyFromTs(), used: 0, boostUsed: 0, lastTs: 0 },
       trial: { events: [] },
-      apiKeyEnc: "", // optional: saved BYOK (encrypted) if you ever want it
+      apiKeyEnc: "",
     };
     scheduleSave();
-  } else {
-    if (uid && db.accounts[id].userId !== uid) {
-      db.accounts[id].userId = uid;
-      scheduleSave();
-    }
+  } else if (uid && db.accounts[id].userId !== uid) {
+    db.accounts[id].userId = uid;
+    scheduleSave();
   }
+
+  syncStripeMode(db.accounts[id]);
   return db.accounts[id];
 }
 
@@ -265,7 +320,10 @@ function getAccountByCustomer(customerId) {
   const cid = String(customerId || "").trim();
   const accId = db.customers[cid];
   if (!accId) return null;
-  return db.accounts[accId] || null;
+
+  const acc = db.accounts[accId] || null;
+  if (acc) syncStripeMode(acc);
+  return acc;
 }
 
 function attachCustomerToAccount(account, customerId) {
@@ -288,7 +346,7 @@ function getIds(req) {
 
   const userId = String(
     h["x-gle-user-id"] ||
-      h["x-gle-user"] || // ✅ fallback für deinen aktuellen Frontend-Bug
+      h["x-gle-user"] || // fallback für Frontend-Bug
       h["x-user-id"] ||
       "",
   ).trim();
@@ -297,7 +355,6 @@ function getIds(req) {
 }
 
 function getApiKey(req) {
-  // headers + body fallback
   return String(
     req.headers["x-gle-api-key"] ||
       req.headers["x-openai-key"] ||
@@ -429,7 +486,6 @@ const BOUNCER_MAX_PASSES = Math.max(
 );
 
 const REQUIRED_BANNED_STEMS = [
-  // meta/apology / "need more info"
   "tutmirleid",
   "bittegib",
   "benoetig",
@@ -525,7 +581,7 @@ function findStemViolations(text, stems = ACTIVE_BANNED_STEMS) {
 }
 
 // --------------------
-// CTA + Sanitizer (last mile)
+// CTA + Sanitizer (last mile) — NON-social only
 // --------------------
 function detectCtaLabelFromExtra(extra) {
   const s = String(extra || "");
@@ -556,7 +612,7 @@ function forceNeutralCTA(output, extra) {
   ];
   const chosen = allowed[0];
 
-  const want = detectCtaLabelFromExtra(extra); // may be null
+  const want = detectCtaLabelFromExtra(extra);
   const out = String(output || "")
     .split(/\r?\n/)
     .map((line) => {
@@ -567,7 +623,6 @@ function forceNeutralCTA(output, extra) {
     })
     .join("\n");
 
-  // If format expects CTA but model forgot it: append one line (safe fallback)
   const expects =
     /CTA-Zeile/i.test(String(extra || "")) ||
     /CTA\s*:/i.test(String(extra || ""));
@@ -579,38 +634,25 @@ function forceNeutralCTA(output, extra) {
   return out;
 }
 
-/**
- * Hard sanitize the most frequent “hot stems” that keep tripping the bouncer,
- * without asking the model again.
- */
 function hardStripHotStems(output) {
   let s = String(output || "");
 
-  // remove/replace common offenders (keep it simple and safe)
   const repl = [
-    // nutz* family
     [/\b(nutz\w*)\b/gi, "Content erstellen"],
-    // vorsprung / vorsp*
     [/\b(vorsprung\w*)\b/gi, "klarer Schritt nach vorn"],
     [/\b(vorsp\w*)\b/gi, "klarer Schritt nach vorn"],
-    // sicher*
     [/\b(sicher\w*)\b/gi, "jetzt"],
-    // optimier/steiger/verbesser
     [/\b(optimier\w*|steiger\w*|verbesser\w*)\b/gi, "reduzieren"],
-    // erfolg*
     [/\b(erfolg\w*)\b/gi, "Ergebnis"],
-    // chance/verpass/profit/exklus/konkurrenz/agentur/leader/luxus/strateg
     [
       /\b(chanc\w*|verpass\w*|profit\w*|exklus\w*|konkurrenz\w*|agentur\w*|leader\w*|luxus\w*|strateg\w*)\b/gi,
       "",
     ],
-    // buzzwords you explicitly hate often
     [/\b(hochwertig\w*|blitzschnell\w*|revolution\w*|premium\w*)\b/gi, ""],
   ];
 
   for (const [rx, to] of repl) s = s.replace(rx, to);
 
-  // clean extra spaces
   s = s
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
@@ -731,7 +773,7 @@ async function callOpenAI({ apiKey, model, prompt, temperature }) {
 }
 
 // --------------------
-// Input mapping (THE FIX)
+// Input mapping
 // --------------------
 function normalizeInputs(body) {
   const b = body || {};
@@ -739,12 +781,10 @@ function normalizeInputs(body) {
   const useCase = String(
     b.useCase ?? b.use_case ?? b.uc ?? b.template ?? b.type ?? "",
   ).trim();
-
   const tone = String(b.tone ?? b.style ?? b.voice ?? "").trim();
 
-  // IMPORTANT: accept both topic/extra/outLang and goal/context/language
+  // accept topic/extra/outLang AND goal/context/language
   const topic = String(b.topic ?? b.goal ?? b.subject ?? b.title ?? "").trim();
-
   const extra = String(
     b.extra ?? b.context ?? b.instructions ?? b.prompt ?? "",
   ).trim();
@@ -758,18 +798,20 @@ function normalizeInputs(body) {
 }
 
 // --------------------
-// Prompt builder
+// Master Prompt Builder (required)
 // --------------------
 function buildMasterPrompt({ useCase, tone, topic, extra, outLang }) {
   const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
-  const uc = String(useCase || "Allgemein").trim();
-  const t = String(tone || "Neutral").trim();
+  const uc = String(useCase || "").trim() || "Content";
+  const t =
+    String(tone || "").trim() ||
+    (lang === "EN" ? "Professional" : "Professionell");
   const cleanTopic = String(topic || "").trim();
   const cleanExtra = String(extra || "").trim();
 
   return `
-Du bist ein deutscher Copywriter. Du lieferst fertigen Content.
-Kein Meta, keine Rückfragen, keine Entschuldigungen.
+Du bist "GLE Prompt Studio".
+Du lieferst FERTIGEN Content. Kein Meta, keine Rückfragen, keine Entschuldigungen.
 
 Zielsprache: ${lang}
 Use-Case: ${uc}
@@ -777,22 +819,23 @@ Ton: ${t}
 
 HARTE REGELN:
 - Keine Einleitungssätze (“Hier ist…”, “Gerne…”, “Es tut mir leid…”).
-- Keine Sie-Ansprache. Nutze “du” ODER neutral ohne Pronomen.
 - Keine Emojis.
 - Keine Buzzwords/Floskeln (z.B. “hochwertig”, “ohne Aufwand”, “Premium”, “revolutionär”).
 - Schreibe konkret: was + für wen + Ergebnis, in einfachen Worten.
-- Halte CTA neutral (keine Imperative wie “Sichere dir…”).
+- CTA neutral halten (keine Imperative wie “Sichere dir…”, “Jetzt anmelden…”).
+- Ausgabe: nur der finale Content.
 
 THEMA:
 ${cleanTopic || "(kein Thema angegeben)"}
 
-FORMAT / Anforderungen:
+FORMAT / Anforderungen (exakt einhalten):
 ${cleanExtra || "(kein Format vorgegeben)"}
-
-Gib ausschließlich den fertigen Output aus.
 `.trim();
 }
 
+// --------------------
+// Repair Prompt (single source of truth)
+// --------------------
 function buildRepairPrompt({
   badOutput,
   hits,
@@ -809,6 +852,48 @@ function buildRepairPrompt({
       : "";
   const hitList = Array.isArray(hits) && hits.length ? hits.join(", ") : "";
 
+  // Social Media Post = strict 6 lines
+  if (String(useCase || "").trim() === "Social Media Post") {
+    return `
+You are a strict formatter AND copy editor.
+
+Rewrite the text below completely new if needed.
+Remove banned word stems.
+Keep meaning.
+DO NOT reuse phrases directly.
+
+LANGUAGE: ${lang}
+TONE: ${tone}
+
+BANNED STEMS (must NOT appear):
+${bannedAll || "(none)"}
+
+REQUIRED STRUCTURE (EXACTLY 6 LINES):
+Line 1: Hook sentence (no title).
+Line 2: - Bullet point 1
+Line 3: - Bullet point 2
+Line 4: - Bullet point 3
+Line 5: - Bullet point 4
+Line 6: Specific CTA sentence with a clear action (comment/reply/click/write).
+
+STRICT RULES:
+- NO titles
+- NO markdown
+- NO bold (**)
+- NO generic CTA
+- DO NOT add lines
+- DO NOT merge lines
+- Output ONLY the 6 lines
+- If impossible: output FORMAT_ERROR
+
+Previous output (do NOT reuse directly):
+"""
+${String(badOutput || "").slice(0, 2000)}
+"""
+`.trim();
+  }
+
+  // Default repair for other use-cases
   return `
 Du bist strenger Copy-Editor. Du lieferst FERTIGEN Content – kein Meta, keine Entschuldigungen.
 Zielsprache: ${lang}
@@ -819,13 +904,13 @@ Thema: ${topic}
 QUALITY GATE (hart):
 1) Schreibe KOMPLETT NEU. Nicht umformulieren, nichts wiederverwenden.
 2) Keine Einleitungssätze, keine Erklärungen, kein “Hier ist…”.
-3) Keine Entschuldigungen / kein “mir fehlen Infos” / kein “I can’t…”.
+3) Keine Entschuldigungen / kein “mir fehlen Infos”.
 4) Keine Floskeln & kein Marketing-Pathos. Kurz, klar, konkret.
 5) Keine Sie-Ansprache. Nutze “du” ODER neutral ohne Pronomen.
 6) VERBOTEN: In deiner finalen Antwort darf KEIN Wortteil aus dieser Liste vorkommen:
 ${bannedAll || "(leer)"}
 7) Treffer im letzten Output waren: ${hitList || "(keine)"} — diese müssen weg.
-8) CTA neutral halten. Kein “Sichere dir…”, kein “Jetzt anmelden…”, kein Imperativ.
+8) CTA neutral halten. Kein Imperativ.
 9) Wenn ein verbotener Stamm vorkommt: komplett neu schreiben. Nicht erwähnen.
 
 FORMAT / Anforderungen (exakt einhalten):
@@ -836,6 +921,65 @@ Alter Output (nur zur Analyse, NICHT wiederverwenden):
 ${String(badOutput || "").slice(0, 2000)}
 """
 `.trim();
+}
+
+// --------------------
+// Social Post: Format Validation Helpers
+// --------------------
+function stripMarkdownArtifacts(s = "") {
+  let out = String(s || "");
+  out = out.replace(/\*\*/g, "");
+  out = out.replace(/^\s*#+\s+.*$/gm, "");
+  out = out.replace(/\r\n/g, "\n").trim();
+  return out;
+}
+
+function validateSocialPost(output) {
+  const lines = String(output || "")
+    .trim()
+    .split("\n");
+  if (lines.length !== 6) return false;
+
+  for (let i = 1; i <= 4; i++) {
+    if (!lines[i].startsWith("- ")) return false;
+    if (lines[i].trim().length < 4) return false;
+  }
+
+  if (lines[5].trim().length < 6) return false;
+  if (output.includes("**")) return false;
+
+  return true;
+}
+
+function buildSocialFallback({ outLang, topic }) {
+  const isEn = String(outLang || "").toLowerCase() === "en";
+  const hasBeta = /beta|early access|warteliste|waitlist/i.test(
+    String(topic || ""),
+  );
+
+  if (isEn) {
+    return [
+      "From the outside, it looks quiet.",
+      "- Core logic was tightened in the background.",
+      "- Limits and guardrails were refined.",
+      "- The payment flow was stabilized further.",
+      "- The technical base was hardened step by step.",
+      hasBeta
+        ? "Reply with BETA and I’ll send you the access details."
+        : "Reply if you want the next update.",
+    ].join("\n");
+  }
+
+  return [
+    "Von außen wirkt es ruhig.",
+    "- Plan-Logik im Hintergrund stabilisiert.",
+    "- Limits und Guardrails nachgeschärft.",
+    "- Zahlungs-Flow robuster synchronisiert.",
+    "- Technische Basis weiter gehärtet.",
+    hasBeta
+      ? "Kommentiere BETA, dann schicke ich dir den Zugang."
+      : "Kommentiere UPDATE, wenn du den nächsten Stand sehen willst.",
+  ].join("\n");
 }
 
 // --------------------
@@ -878,16 +1022,22 @@ app.post(
 
         if (accountId) {
           const acc = getOrCreateAccount(accountId, userId);
+          syncStripeMode(acc);
+
           if (customerId) attachCustomerToAccount(acc, String(customerId));
           if (subscriptionId)
             acc.stripe.subscriptionId = String(subscriptionId);
+
           acc.plan = "PRO";
           scheduleSave();
         } else if (customerId) {
           const acc = getAccountByCustomer(String(customerId));
           if (acc) {
+            syncStripeMode(acc);
+
             if (subscriptionId)
               acc.stripe.subscriptionId = String(subscriptionId);
+
             acc.plan = "PRO";
             scheduleSave();
           }
@@ -903,6 +1053,8 @@ app.post(
         const acc = getAccountByCustomer(customerId);
 
         if (acc) {
+          syncStripeMode(acc);
+
           acc.stripe.subscriptionId = String(
             sub.id || acc.stripe.subscriptionId || "",
           );
@@ -923,6 +1075,7 @@ app.post(
             "unpaid",
           ].includes(String(sub.status || ""));
           if (stillActive) acc.plan = "PRO";
+
           scheduleSave();
         }
       }
@@ -931,7 +1084,10 @@ app.post(
         const sub = obj;
         const customerId = String(sub.customer || "");
         const acc = getAccountByCustomer(customerId);
+
         if (acc) {
+          syncStripeMode(acc);
+
           acc.stripe.status = "canceled";
           acc.stripe.cancelAtPeriodEnd = false;
           acc.stripe.cancelAt = now();
@@ -960,10 +1116,15 @@ app.use(
     allowedHeaders: [
       "Content-Type",
       "x-gle-user",
+      "x-gle-user-id",
+      "x-user-id",
       "x-gle-account-id",
+      "x-gle-accountid",
+      "x-account-id",
       "x-gle-api-key",
       "x-openai-key",
       "x-api-key",
+      "x-admin-key",
     ],
   }),
 );
@@ -998,6 +1159,7 @@ app.get("/api/health", (req, res) => {
       stemsCount: ACTIVE_BANNED_STEMS.length,
     },
     allowedOrigins: ALLOWED_ORIGINS,
+    vercelProjectSlug: VERCEL_PROJECT_SLUG,
   });
 });
 
@@ -1042,6 +1204,7 @@ app.post("/api/admin/set-plan", (req, res) => {
   try {
     if (!ADMIN_KEY)
       return res.status(500).json({ ok: false, error: "admin_not_configured" });
+
     const key = String(
       req.headers["x-admin-key"] || req.body?.adminKey || "",
     ).trim();
@@ -1052,15 +1215,19 @@ app.post("/api/admin/set-plan", (req, res) => {
     const plan = String(req.body?.plan || "")
       .trim()
       .toUpperCase();
+
     if (!accountId)
       return res.status(400).json({ ok: false, error: "missing_account_id" });
     if (plan !== "PRO" && plan !== "FREE")
       return res.status(400).json({ ok: false, error: "bad_plan" });
 
     const acc = getOrCreateAccount(accountId, "admin");
+    syncStripeMode(acc);
+
     acc.plan = plan;
     acc.updatedAt = new Date().toISOString();
     scheduleSave();
+
     return res.json({ ok: true, accountId, plan });
   } catch (e) {
     return res.status(500).json({
@@ -1083,6 +1250,7 @@ app.post("/api/test", async (req, res) => {
       prompt: "ping",
       temperature: 0.0,
     });
+
     return res.json({ ok: true, sample: String(text).slice(0, 40) });
   } catch (e) {
     return res
@@ -1104,6 +1272,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
       return res.status(400).json({ ok: false, error: "missing_account_id" });
 
     const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
 
     const base = pickReturnBase(req);
     const successUrl = `${base}/checkout-success?session_id={CHECKOUT_SESSION_ID}`;
@@ -1134,48 +1303,98 @@ app.post("/api/create-checkout-session", async (req, res) => {
 app.post("/api/sync-checkout-session", async (req, res) => {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
-    if (!stripe)
+    if (!stripe) {
       return res
         .status(500)
         .json({ ok: false, error: "stripe_not_configured" });
+    }
 
     const { userId, accountId } = getIds(req);
-    const sessionId = String(req.body?.sessionId || "").trim();
+    const sessionId = String(
+      req.body?.sessionId || req.body?.session_id || "",
+    ).trim();
 
-    if (!accountId)
+    if (!accountId) {
       return res.status(400).json({ ok: false, error: "missing_account_id" });
-    if (!sessionId)
+    }
+    if (!sessionId) {
       return res.status(400).json({ ok: false, error: "missing_session_id" });
+    }
 
     const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["subscription", "customer"],
     });
 
+    if (String(session.mode || "") !== "subscription") {
+      return res.status(409).json({
+        ok: false,
+        error: "wrong_checkout_mode",
+        checkoutMode: session.mode || "",
+      });
+    }
+
+    const sessionAccountId = String(session?.metadata?.accountId || "").trim();
+    if (sessionAccountId && sessionAccountId !== acc.accountId) {
+      return res.status(403).json({
+        ok: false,
+        error: "session_account_mismatch",
+      });
+    }
+
+    if (String(session.status || "") !== "complete") {
+      return res.status(409).json({
+        ok: false,
+        error: "checkout_not_complete",
+        checkoutStatus: session.status || "",
+        paymentStatus: session.payment_status || "",
+      });
+    }
+
     const customerId = String(
       session.customer?.id || session.customer || "",
     ).trim();
-    const subscription = session.subscription;
-
     if (customerId) attachCustomerToAccount(acc, customerId);
 
-    if (subscription && typeof subscription === "object") {
-      acc.stripe.subscriptionId = String(subscription.id || "");
-      acc.stripe.status = String(subscription.status || "");
-      acc.stripe.currentPeriodEnd = normalizeStripeTs(
-        subscription.current_period_end,
-      );
-      acc.stripe.cancelAtPeriodEnd = !!subscription.cancel_at_period_end;
-      acc.stripe.cancelAt = normalizeStripeTs(
-        subscription.cancel_at ||
-          (subscription.cancel_at_period_end
-            ? subscription.current_period_end
-            : 0),
-      );
+    const subscription = session.subscription;
+    if (!subscription || typeof subscription !== "object") {
+      return res.status(409).json({
+        ok: false,
+        error: "missing_subscription",
+      });
     }
 
+    const subStatus = String(subscription.status || "").trim();
+    const proStatuses = ["active", "trialing", "past_due", "unpaid"];
+
+    if (!proStatuses.includes(subStatus)) {
+      acc.stripe.status = subStatus;
+      scheduleSave();
+
+      return res.status(409).json({
+        ok: false,
+        error: "subscription_not_active",
+        subscriptionStatus: subStatus,
+      });
+    }
+
+    acc.stripe.subscriptionId = String(subscription.id || "");
+    acc.stripe.status = subStatus;
+    acc.stripe.currentPeriodEnd = normalizeStripeTs(
+      subscription.current_period_end,
+    );
+    acc.stripe.cancelAtPeriodEnd = !!subscription.cancel_at_period_end;
+    acc.stripe.cancelAt = normalizeStripeTs(
+      subscription.cancel_at ||
+        (subscription.cancel_at_period_end
+          ? subscription.current_period_end
+          : 0),
+    );
+
     acc.plan = "PRO";
+    syncStripeMode(acc);
     scheduleSave();
 
     return res.json({
@@ -1183,6 +1402,7 @@ app.post("/api/sync-checkout-session", async (req, res) => {
       plan: "PRO",
       customerId: acc.stripe.customerId,
       subscriptionId: acc.stripe.subscriptionId,
+      status: acc.stripe.status,
     });
   } catch (e) {
     console.error("sync error:", e);
@@ -1208,6 +1428,8 @@ async function handlePortalSession(req, res) {
       return res.status(400).json({ ok: false, error: "missing_account_id" });
 
     const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
+
     if (!acc.stripe?.customerId)
       return res.status(400).json({ ok: false, error: "missing_customer_id" });
 
@@ -1233,7 +1455,9 @@ async function handlePortalSession(req, res) {
 app.post("/api/billing-portal", handlePortalSession);
 app.post("/api/create-portal-session", handlePortalSession); // alias/fallback
 
-// Generate
+// --------------------
+// Generate (SINGLE ROUTE - FINAL)
+// --------------------
 app.post("/api/generate", async (req, res) => {
   try {
     console.log("GLE_GENERATE_MARKER:", process.env.BUILD_TAG || "no-tag");
@@ -1244,6 +1468,7 @@ app.post("/api/generate", async (req, res) => {
       return res.status(400).json({ ok: false, error: "missing_account_id" });
 
     const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
 
     // optional honeypot
     const hp = String(req.body?.hp || "").trim();
@@ -1273,14 +1498,11 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    // --------------------
-    // Decide key/mode + INTERNAL model
-    // --------------------
+    // Decide key/mode + internal model
     let mode = "BYOK"; // BYOK | PRO_SERVER | TRIAL_SERVER
     let apiKeyToUse = byokKey;
-
-    // Intern: echtes Modell (nie im UI anzeigen!)
     let modelToUse = wantsBoost ? MODEL_BOOST : isPro ? MODEL_PRO : MODEL_BYOK;
+    let shouldBurnTrial = false;
 
     if (!byokKey) {
       if (isPro && SERVER_OPENAI_KEY) {
@@ -1293,7 +1515,7 @@ app.post("/api/generate", async (req, res) => {
           mode = "TRIAL_SERVER";
           apiKeyToUse = SERVER_OPENAI_KEY;
           modelToUse = MODEL_PRO;
-          markTrial(acc);
+          shouldBurnTrial = true;
         } else {
           return res.status(400).json({
             ok: false,
@@ -1302,15 +1524,13 @@ app.post("/api/generate", async (req, res) => {
               "No BYOK key set. Start checkout (PRO) or set your OpenAI API key.",
             trial: tr,
             mode,
-            model: ENGINE_BYOK, // UI-Label
+            model: ENGINE_BYOK,
           });
         }
       }
     }
 
-    // --------------------
-    // PUBLIC engine label (UI) – NIE echte Modellnamen
-    // --------------------
+    // Public engine label
     const engineLabel = wantsBoost
       ? ENGINE_ULTRA
       : byokKey
@@ -1321,13 +1541,10 @@ app.post("/api/generate", async (req, res) => {
             ? ENGINE_PRO
             : ENGINE_BYOK;
 
-    // Debug-Header (hilft dir sofort zu sehen was läuft)
     res.setHeader("x-gle-engine", engineLabel);
-    res.setHeader("x-gle-model", engineLabel); // legacy: nur public label
+    res.setHeader("x-gle-model", engineLabel);
 
-    // --------------------
     // Quota
-    // --------------------
     const quota = enforceQuota(acc, wantsBoost);
     if (!quota.ok) {
       return res.status(429).json({
@@ -1339,35 +1556,35 @@ app.post("/api/generate", async (req, res) => {
         boostUsed: quota.boostUsed,
         boostLimit: quota.boostLimit,
         mode,
-        model: engineLabel, // ✅ UI-Label
+        model: engineLabel,
       });
     }
 
-    // --------------------
-    // Build prompt
-    // --------------------
-    const prompt = buildMasterPrompt({
-      useCase,
+    // Prompt
+    const masterPrompt = buildMasterPrompt({
+      useCase: String(useCase || "").trim(),
       tone,
       topic,
       extra,
       outLang,
-      boost: wantsBoost,
     });
 
-    // --------------------
-    // 1) First pass (OpenAI bekommt IMMER modelToUse)
-    // --------------------
+    const useCaseNorm = String(useCase || "")
+      .trim()
+      .toLowerCase();
+    const isSocial =
+      (useCaseNorm.includes("social") && useCaseNorm.includes("post")) ||
+      useCaseNorm === "social media post";
+
+    // 1) First pass
     let output = await callOpenAI({
       apiKey: apiKeyToUse,
-      model: modelToUse, // ✅ wichtig
-      prompt,
+      model: modelToUse,
+      prompt: masterPrompt,
       temperature: 0.6,
     });
 
-    // --------------------
-    // 2) Bouncer rewrite loop (OpenAI bekommt IMMER modelToUse)
-    // --------------------
+    // 2) Bouncer rewrite loop
     if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
       for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
         const hits = findStemViolations(output);
@@ -1385,43 +1602,54 @@ app.post("/api/generate", async (req, res) => {
 
         output = await callOpenAI({
           apiKey: apiKeyToUse,
-          model: modelToUse, // ✅ wichtig
+          model: modelToUse,
           prompt: repair,
           temperature: 0.0,
         });
       }
     }
 
-    // ✅ last-mile enforcement
-    output = normalizeCtaLabel(output, extra);
-    output = forceNeutralCTA(output, extra);
-    output = hardStripHotStems(output);
+    // Social Post: strict 6 lines OR deterministic fallback
+    if (isSocial) {
+      output = stripMarkdownArtifacts(output);
 
-    // --------------------
-    // FINAL CLEAN (IMMER) – Link in Bio / Whitespace
-    // --------------------
+      if (!validateSocialPost(output)) {
+        output = buildSocialFallback({ outLang, topic });
+      } else {
+        output = output
+          .trim()
+          .split("\n")
+          .map((l) => l.trimEnd())
+          .slice(0, 6)
+          .join("\n");
+      }
+
+      res.setHeader("x-gle-social", "1");
+      res.setHeader("x-gle-social-valid", String(validateSocialPost(output)));
+    } else {
+      res.setHeader("x-gle-social", "0");
+
+      // last-mile only for NON-social (otherwise format breaks)
+      output = normalizeCtaLabel(output, extra);
+      output = forceNeutralCTA(output, extra);
+      output = hardStripHotStems(output);
+    }
+
+    // Final clean (do NOT flatten lines)
     output = String(output || "")
-      // ganze Zeile killen (egal ob groß/klein, mit Leerzeichen)
+      .replace(/\u00A0/g, " ")
       .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
-      // inline killen
+      .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
       .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
-      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\blink\s+in\s+bio\b/gi, "")
+      .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
 
-    // Nur HARD darf 422 (wenn du findViolations nutzt)
-    if (BOUNCER_ENABLED && typeof findViolations === "function") {
-      const { hard } = findViolations(output, DEFAULT_BANNED_STEMS);
-      if (hard && hard.length) {
-        return res.status(422).json({
-          ok: false,
-          error: "hard_violations",
-          hard,
-          mode,
-          model: engineLabel, // ✅ UI-Label
-        });
-      }
+    if (shouldBurnTrial) {
+      markTrial(acc);
     }
 
     markUsage(acc, wantsBoost);
@@ -1430,65 +1658,10 @@ app.post("/api/generate", async (req, res) => {
       ok: true,
       output,
       mode,
-      model: engineLabel, // ✅ NIE mehr gpt-...
-      plan: isPro ? "PRO" : "FREE",
+      model: engineLabel,
+      plan: planIsPro(acc) ? "PRO" : "FREE",
       used: acc.usage.used,
-      limit: isPro ? PRO_LIMIT : FREE_LIMIT,
-      boostUsed: acc.usage.boostUsed,
-      boostLimit: PRO_BOOST_LIMIT,
-      renewAt: computeRenewAt(acc),
-      cancelAt: computeCancelAt(acc),
-    });
-    // --------------------
-    // LAST LINE DEFENSE (UI + Output clean) + PUBLIC HEADERS
-    // --------------------
-    res.setHeader("x-gle-engine", engineLabel);
-    res.setHeader("x-gle-model", engineLabel); // legacy header -> nur public label
-
-    output = String(output || "")
-      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
-      .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
-      .replace(/[ \t]{2,}/g, " ")
-      .replace(/\s+([,.;:!?])/g, "$1")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-
-    return res.json({
-      ok: true,
-      output,
-      mode,
-      model: engineLabel, // ✅ NIE mehr gpt-...
-      plan: isPro ? "PRO" : "FREE",
-      used: acc.usage.used,
-      limit: isPro ? PRO_LIMIT : FREE_LIMIT,
-      boostUsed: acc.usage.boostUsed,
-      boostLimit: PRO_BOOST_LIMIT,
-      renewAt: computeRenewAt(acc),
-      cancelAt: computeCancelAt(acc),
-    });
-
-    output = String(output || "")
-      .replace(/\u00A0/g, " ") // NBSP kill
-      // komplette "Link in Bio" Zeilen entfernen (DE/EN Varianten)
-      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
-      .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
-      // falls inline irgendwo drin: auch noch raus
-      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
-      .replace(/\blink\s+in\s+bio\b/gi, "")
-      // Whitespace cleanup
-      .replace(/[ \t]{2,}/g, " ")
-      .replace(/\s+([,.;:!?])/g, "$1")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-
-    return res.json({
-      ok: true,
-      output,
-      mode,
-      model: publicModel, // ✅ NIE mehr gpt-...
-      plan: isPro ? "PRO" : "FREE",
-      used: acc.usage.used,
-      limit: isPro ? PRO_LIMIT : FREE_LIMIT,
+      limit: planIsPro(acc) ? PRO_LIMIT : FREE_LIMIT,
       boostUsed: acc.usage.boostUsed,
       boostLimit: PRO_BOOST_LIMIT,
       renewAt: computeRenewAt(acc),
@@ -1502,14 +1675,14 @@ app.post("/api/generate", async (req, res) => {
       message: e?.message || String(e),
     });
   }
-}); // ✅ WICHTIG: endet app.post("/api/generate", ...)
+});
 
 // optional root
 app.get("/", (req, res) =>
   res.type("text/plain").send("GLE Prompt Studio Backend OK"),
 );
 
-// ✅ Server start ganz unten (Top-Level, nicht in einer Route!)
+// Server start (top-level)
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ GLE Engine Online | Port: ${PORT}`);
 });
