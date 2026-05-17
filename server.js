@@ -638,7 +638,7 @@ function hardStripHotStems(output) {
   let s = String(output || "");
 
   const repl = [
-    [/\b(nutz\w*)\b/gi, "Content erstellen"],
+    [/\b(nutz\w*)\b/gi, "verwenden"],
     [/\b(vorsprung\w*)\b/gi, "klarer Schritt nach vorn"],
     [/\b(vorsp\w*)\b/gi, "klarer Schritt nach vorn"],
     [/\b(sicher\w*)\b/gi, "jetzt"],
@@ -818,17 +818,31 @@ Use-Case: ${uc}
 Ton: ${t}
 
 HARTE REGELN:
-- Keine Einleitungssätze (“Hier ist…”, “Gerne…”, “Es tut mir leid…”).
+- Keine Einleitungssätze ("Hier ist...", "Gerne...", "Es tut mir leid...").
 - Keine Emojis.
-- Keine Buzzwords/Floskeln (z.B. “hochwertig”, “ohne Aufwand”, “Premium”, “revolutionär”).
+- Keine Buzzwords/Floskeln wie "hochwertig", "ohne Aufwand", "Premium", "revolutionär".
+- Keine leeren Überschriften, keine leeren Nummernpunkte, keine leeren Bulletpoints.
+- Jede nummerierte Zeile muss Inhalt haben.
+- Wenn ein Format Punkt 1), 2), 3) usw. verlangt, muss jeder Punkt vollständig ausgefüllt sein.
+- CTA nur einmal ausgeben.
+- Wenn im Format bereits "CTA-Zeile" verlangt wird, dann KEINE zusätzliche CTA am Ende anhängen.
+- CTA neutral halten, z.B. "Zur Warteliste.", "Early Access: Eintragen.", "Mehr erfahren."
+- FAQ sauber schreiben: Frage und Antwort jeweils vollständig, keine halben Zeilen.
 - Schreibe konkret: was + für wen + Ergebnis, in einfachen Worten.
-- CTA neutral halten (keine Imperative wie “Sichere dir…”, “Jetzt anmelden…”).
 - Ausgabe: nur der finale Content.
+
+QUALITÄTSREGELN:
+- Kein Platzhaltertext.
+- Keine technischen Begriffe wie BYOK, Server-Key, Tokens, Modellname, GPT, API.
+- Keine Sätze über KI oder das Tool selbst, außer das Thema verlangt es ausdrücklich.
+- Kein "Link in Bio".
+- Kein doppelter CTA.
+- Wenn der Nutzer ein exaktes Format vorgibt, halte dieses Format ein und fülle jeden Punkt vollständig.
 
 THEMA:
 ${cleanTopic || "(kein Thema angegeben)"}
 
-FORMAT / Anforderungen (exakt einhalten):
+FORMAT / Anforderungen (exakt einhalten und vollständig ausfüllen):
 ${cleanExtra || "(kein Format vorgegeben)"}
 `.trim();
 }
@@ -1125,6 +1139,13 @@ app.use(
       "x-openai-key",
       "x-api-key",
       "x-admin-key",
+    ],
+    exposedHeaders: [
+      "x-gle-build",
+      "x-gle-engine",
+      "x-gle-model",
+      "x-gle-format-fix",
+      "x-gle-structural-repair",
     ],
   }),
 );
@@ -1584,69 +1605,241 @@ app.post("/api/generate", async (req, res) => {
       temperature: 0.6,
     });
 
-    // 2) Bouncer rewrite loop
-    if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
-      for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
-        const hits = findStemViolations(output);
-        if (!hits.length) break;
+    // 1.5) Structural repair pass
+const needsStructuralRepair =
+  !isSocial &&
+  (
+    /^\s*\d+\)\s*$/im.test(output) ||
+    /\n\s*CTA-Zeile:/i.test(output) ||
+    output.split("\n").length < 5 ||
+    /Content erstellen|konsistent Inhalte|Wer kann .* Content erstellen|CTA-Zeile:\s*Zur Warteliste/i.test(output)
+  );
 
-        const repair = buildRepairPrompt({
-          badOutput: output,
-          hits,
-          useCase,
-          tone,
-          topic,
-          extra,
-          outLang,
-        });
+if (needsStructuralRepair) {
+  res.setHeader("x-gle-structural-repair", "1");
 
-        output = await callOpenAI({
-          apiKey: apiKeyToUse,
-          model: modelToUse,
-          prompt: repair,
-          temperature: 0.0,
-        });
-      }
-    }
+  const repairPrompt = `
+Du bist ein strenger deutscher SaaS-Copy-Editor.
 
-    // Social Post: strict 6 lines OR deterministic fallback
-    if (isSocial) {
-      output = stripMarkdownArtifacts(output);
+Schreibe den Content KOMPLETT NEU.
+Nicht flicken. Nicht einzelne Wörter ersetzen. Komplett sauber neu ausgeben.
 
-      if (!validateSocialPost(output)) {
-        output = buildSocialFallback({ outLang, topic });
-      } else {
-        output = output
-          .trim()
-          .split("\n")
-          .map((l) => l.trimEnd())
-          .slice(0, 6)
-          .join("\n");
-      }
+Zielsprache: ${outLang}
+Use-Case: ${useCase}
+Ton: ${tone}
 
-      res.setHeader("x-gle-social", "1");
-      res.setHeader("x-gle-social-valid", String(validateSocialPost(output)));
-    } else {
-      res.setHeader("x-gle-social", "0");
+THEMA:
+${topic}
 
-      // last-mile only for NON-social (otherwise format breaks)
-      output = normalizeCtaLabel(output, extra);
-      output = forceNeutralCTA(output, extra);
-      output = hardStripHotStems(output);
-    }
+FORMAT MUSS EXAKT SO AUSSEHEN:
 
-    // Final clean (do NOT flatten lines)
+1) Headline: [maximal 9 Wörter]
+2) Subheadline: [ein natürlicher Satz]
+3) Bulletpoints:
+- [vollständiger Bulletpoint 1]
+- [vollständiger Bulletpoint 2]
+- [vollständiger Bulletpoint 3]
+- [vollständiger Bulletpoint 4]
+- [vollständiger Bulletpoint 5]
+4) CTA-Zeile: [genau 1 neutrale CTA, kein zusätzlicher CTA danach]
+5) Mini-FAQ:
+- Frage: [Frage 1]
+  Antwort: [Antwort 1 als vollständiger Satz]
+- Frage: [Frage 2]
+  Antwort: [Antwort 2 als vollständiger Satz]
+- Frage: [Frage 3]
+  Antwort: [Antwort 3 als vollständiger Satz]
+
+VERBOTEN:
+- "3)" ohne "Bulletpoints:"
+- "4)" ohne "CTA-Zeile:"
+- ein zusätzlicher CTA nach Punkt 5
+- "Content erstellen" als Satzfragment
+- "Wer kann ... Content erstellen?"
+- Sie-Form, also "Sie", "Ihr", "Ihre", "Ihren"
+
+HARTE REGELN:
+- Keine leeren Zeilen nach Nummernpunkten.
+- Kein leerer Punkt wie "3)".
+- Kein zusätzlicher CTA am Ende.
+- Keine kaputten Sätze.
+- Kein "Link in Bio".
+- Kein Meta-Text.
+- Keine Emojis.
+- Keine technischen Begriffe wie GPT, API, Modell, BYOK.
+- Schreibe natürlich, ruhig und verkaufbar.
+
+ZUSATZANFORDERUNGEN:
+${extra}
+
+ALTER SCHLECHTER OUTPUT:
+${output}
+
+Gib nur den finalen reparierten Content aus.
+`.trim();
+
+  output = await callOpenAI({
+    apiKey: apiKeyToUse,
+    model: modelToUse,
+    prompt: repairPrompt,
+    temperature: 0.3,
+  });
+}
+
+// 2) Bouncer rewrite loop
+if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
+  for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
+    const hits = findStemViolations(output);
+    if (!hits.length) break;
+
+    const repair = buildRepairPrompt({
+      badOutput: output,
+      hits,
+      useCase,
+      tone,
+      topic,
+      extra,
+      outLang,
+    });
+
+    output = await callOpenAI({
+      apiKey: apiKeyToUse,
+      model: modelToUse,
+      prompt: repair,
+      temperature: 0.0,
+    });
+  }
+}
+
+// Social Post: strict 6 lines OR deterministic fallback
+if (isSocial) {
+  output = stripMarkdownArtifacts(output);
+
+  if (!validateSocialPost(output)) {
+    output = buildSocialFallback({ outLang, topic });
+  } else {
+    output = output
+      .trim()
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .slice(0, 6)
+      .join("\n");
+  }
+
+  res.setHeader("x-gle-social", "1");
+  res.setHeader("x-gle-social-valid", String(validateSocialPost(output)));
+} else {
+  res.setHeader("x-gle-social", "0");
+
+  // last-mile only for NON-social
+  output = normalizeCtaLabel(output, extra);
+  output = forceNeutralCTA(output, extra);
+  output = hardStripHotStems(output);
+}
+
+// Final clean (do NOT flatten lines)
+output = String(output || "")
+  .replace(/\u00A0/g, " ")
+
+  // remove "link in bio"
+  .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
+  .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
+  .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+  .replace(/\blink\s+in\s+bio\b/gi, "")
+
+  // remove empty CTA labels
+  .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
+
+  // remove duplicated CTA endings
+  .replace(/(CTA-Zeile:\s*[^\n]+)(\n+\1)+/gim, "$1")
+
+  // remove empty bullet lines
+  .replace(/^\s*[-•]\s*$/gim, "")
+
+  // normalize spacing
+  .replace(/[ \t]{2,}/g, " ")
+  .replace(/\s+([,.;:!?])/g, "$1")
+
+  // collapse repeated blank lines
+  .replace(/\n{3,}/g, "\n\n")
+
+  // cleanup weird broken fragments
+  .replace(/\bContent erstellen\.\b/gi, "Inhalte erstellen")
+  .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
+  .replace(
+    /\bTeil der ersten Inhalte erstellen werden\b/gi,
+    "Teil der Early-Access-Phase werden",
+  )
+  .replace(
+    /\bTeil der ersten Content erstellen werden\b/gi,
+    "Teil der Early-Access-Phase werden",
+  )
+
+  .trim();
+
+// --------------------
+// FINAL LANDINGPAGE FORMAT FIX — ganz am Ende
+// --------------------
+if (!isSocial) {
+  const looksLikeNumberedLanding =
+    /^\s*1\)/m.test(output) &&
+    /^\s*2\)/m.test(output) &&
+    /^\s*3\)/m.test(output);
+
+  if (looksLikeNumberedLanding) {
+    res.setHeader("x-gle-format-fix", "1");
+
     output = String(output || "")
-      .replace(/\u00A0/g, " ")
-      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
-      .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
-      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
-      .replace(/\blink\s+in\s+bio\b/gi, "")
-      .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
+
+      // 3) Inline-Bullets sauber in echte Bullet-Liste umwandeln
+      .replace(/^\s*3\)\s*((?:[-•]\s*.+)+)$/gim, (match, rest) => {
+        const items = String(rest || "")
+          .replace(/^\s*[-•]\s*/, "")
+          .split(/\s+[-•]\s*/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+
+        if (!items.length) return match;
+
+        return `3) Bulletpoints:\n- ${items.join("\n- ")}`;
+      })
+
+      // 3) leer -> 3) Bulletpoints:
+      .replace(/^\s*3\)\s*$/gim, "3) Bulletpoints:")
+
+      // 4) irgendwas -> saubere CTA-Zeile
+      .replace(
+        /^\s*4\)\s*(?!CTA-Zeile:).+$/gim,
+        "4) CTA-Zeile: Zur Warteliste.",
+      )
+
+      // doppelte CTA-Zeile am Ende entfernen
+      .replace(/\n+\s*CTA-Zeile:\s*Zur Warteliste\.\s*$/gim, "")
+
+      // kaputte Fragmente entfernen
+      .replace(/\bWer kann es Inhalte erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
+      .replace(/\bWer kann es Content erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
+      .replace(/\bWer kann .* Inhalte erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
+      .replace(/\bWer kann .* Content erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
+      .replace(/\bGLE Prompt Studio Inhalte erstellen\b/gi, "GLE Prompt Studio ist ein")
+      .replace(/\bGLE Prompt Studio Content erstellen\b/gi, "GLE Prompt Studio ist ein")
+      .replace(/\bTool Inhalte erstellen\b/gi, "Tool nutzen")
+      .replace(/\bTool Content erstellen\b/gi, "Tool nutzen")
+
+      // Sie-Form vermeiden
+      .replace(/\bIhnen\b/g, "dir")
+      .replace(/\bIhren\b/g, "deinen")
+      .replace(/\bIhre\b/g, "deine")
+      .replace(/\bIhr\b/g, "dein")
+      .replace(/\bSie\b/g, "du")
+
+      // letzte Glättung
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+([,.;:!?])/g, "$1")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+  }
+}
 
     if (shouldBurnTrial) {
       markTrial(acc);
