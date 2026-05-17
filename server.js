@@ -997,6 +997,151 @@ function buildSocialFallback({ outLang, topic }) {
 }
 
 // --------------------
+// Landingpage / SaaS structured output helpers
+// --------------------
+function extractJsonObject(text) {
+  const raw = String(text || "").trim();
+
+  try {
+    return JSON.parse(raw);
+  } catch {}
+
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+
+  if (start >= 0 && end > start) {
+    const slice = raw.slice(start, end + 1);
+    try {
+      return JSON.parse(slice);
+    } catch {}
+  }
+
+  return null;
+}
+
+function cleanLine(value, fallback = "") {
+  return String(value || fallback)
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-•]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function renderLandingpageOutput(data) {
+  const headline = cleanLine(data?.headline, "Content schneller erstellen");
+  const subheadline = cleanLine(
+    data?.subheadline,
+    "GLE Prompt Studio hilft Creatorn und Solopreneuren bei Social Posts, Ads und Landingpages.",
+  );
+
+  const bulletsRaw = Array.isArray(data?.bullets) ? data.bullets : [];
+  const bullets = bulletsRaw
+    .map((x) => cleanLine(x))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  while (bullets.length < 5) {
+    bullets.push(
+      [
+        "Weniger Zeitverlust bei der Content-Erstellung.",
+        "Klarere Texte für Social Posts, Ads und Landingpages.",
+        "Konsistente Qualität über mehrere Formate hinweg.",
+        "Geeignet für Creator und Solopreneure.",
+        "Early Access verfügbar, PRO folgt später.",
+      ][bullets.length],
+    );
+  }
+
+  const cta = cleanLine(data?.cta, "Zur Warteliste.");
+
+  const faqRaw = Array.isArray(data?.faq) ? data.faq : [];
+  const faq = faqRaw
+    .map((item) => ({
+      q: cleanLine(item?.q || item?.question),
+      a: cleanLine(item?.a || item?.answer),
+    }))
+    .filter((item) => item.q && item.a)
+    .slice(0, 3);
+
+  while (faq.length < 3) {
+    const fallbacks = [
+      {
+        q: "Was ist GLE Prompt Studio?",
+        a: "Ein Tool für schnellere Social Posts, Ads und Landingpages.",
+      },
+      {
+        q: "Für wen ist GLE Prompt Studio gedacht?",
+        a: "Für Creator und Solopreneure, die klarere Inhalte erstellen möchten.",
+      },
+      {
+        q: "Was kostet GLE Prompt Studio später?",
+        a: "Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.",
+      },
+    ];
+    faq.push(fallbacks[faq.length]);
+  }
+
+  return [
+    `1) ${headline}`,
+    `2) ${subheadline}`,
+    `3) Bulletpoints:`,
+    ...bullets.map((b) => `- ${b}`),
+    `4) CTA-Zeile: ${cta}`,
+    `5) Mini-FAQ:`,
+    ...faq.flatMap((item) => [`- Frage: ${item.q}`, `  Antwort: ${item.a}`]),
+  ].join("\n");
+}
+
+function buildLandingpageJsonPrompt({ useCase, tone, topic, extra, outLang }) {
+  const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
+
+  return `
+Du bist ein deutscher SaaS-Copywriter.
+Erstelle KEINEN Markdown-Text.
+Gib ausschließlich gültiges JSON aus.
+
+Zielsprache: ${lang}
+Use-Case: ${useCase}
+Ton: ${tone}
+
+THEMA:
+${topic}
+
+ANFORDERUNGEN:
+${extra}
+
+JSON-SCHEMA:
+{
+  "headline": "maximal 9 Wörter",
+  "subheadline": "ein natürlicher Satz",
+  "bullets": [
+    "vollständiger Bulletpoint 1",
+    "vollständiger Bulletpoint 2",
+    "vollständiger Bulletpoint 3",
+    "vollständiger Bulletpoint 4",
+    "vollständiger Bulletpoint 5"
+  ],
+  "cta": "kurze neutrale CTA",
+  "faq": [
+    { "q": "Frage 1", "a": "Antwort 1 als vollständiger Satz" },
+    { "q": "Frage 2", "a": "Antwort 2 als vollständiger Satz" },
+    { "q": "Frage 3", "a": "Antwort 3 als vollständiger Satz" }
+  ]
+}
+
+REGELN:
+- Nur gültiges JSON.
+- Keine Markdown-Zeichen.
+- Keine Sternchen.
+- Keine Einleitung.
+- Keine Sie-Ansprache.
+- Kein "Link in Bio".
+- Keine technischen Begriffe wie GPT, API, Modell, BYOK.
+- Natürlich, klar, verkaufbar.
+`.trim();
+}
+
+// --------------------
 // Express app
 // --------------------
 loadDb();
@@ -1580,45 +1725,70 @@ app.post("/api/generate", async (req, res) => {
         model: engineLabel,
       });
     }
-
     // Prompt
-    const masterPrompt = buildMasterPrompt({
-      useCase: String(useCase || "").trim(),
-      tone,
-      topic,
-      extra,
-      outLang,
-    });
-
     const useCaseNorm = String(useCase || "")
       .trim()
       .toLowerCase();
+
     const isSocial =
       (useCaseNorm.includes("social") && useCaseNorm.includes("post")) ||
       useCaseNorm === "social media post";
+
+    const isLandingPage =
+      useCaseNorm.includes("landing") ||
+      useCaseNorm.includes("ad-copy") ||
+      useCaseNorm.includes("saas");
+
+    const masterPrompt = isLandingPage
+      ? buildLandingpageJsonPrompt({
+          useCase: String(useCase || "").trim(),
+          tone,
+          topic,
+          extra,
+          outLang,
+        })
+      : buildMasterPrompt({
+          useCase: String(useCase || "").trim(),
+          tone,
+          topic,
+          extra,
+          outLang,
+        });
 
     // 1) First pass
     let output = await callOpenAI({
       apiKey: apiKeyToUse,
       model: modelToUse,
       prompt: masterPrompt,
-      temperature: 0.6,
+      temperature: isLandingPage ? 0.35 : 0.6,
     });
 
+    // Landingpage/SaaS: JSON vom Modell → Backend rendert festes Format
+    if (isLandingPage) {
+      const parsed = extractJsonObject(output);
+
+      if (parsed) {
+        output = renderLandingpageOutput(parsed);
+        res.setHeader("x-gle-structured", "landingpage-json");
+      } else {
+        res.setHeader("x-gle-structured", "landingpage-json-failed");
+      }
+    }
+
     // 1.5) Structural repair pass
-const needsStructuralRepair =
-  !isSocial &&
-  (
-    /^\s*\d+\)\s*$/im.test(output) ||
-    /\n\s*CTA-Zeile:/i.test(output) ||
-    output.split("\n").length < 5 ||
-    /Content erstellen|konsistent Inhalte|Wer kann .* Content erstellen|CTA-Zeile:\s*Zur Warteliste/i.test(output)
-  );
+    const needsStructuralRepair =
+      !isSocial &&
+      !isLandingPage &&
+      (/^\s*\d+\)\s*$/im.test(output) ||
+        /\n\s*CTA-Zeile:/i.test(output) ||
+        output.split("\n").length < 5 ||
+        /Content erstellen|konsistent Inhalte|Wer kann .* Content erstellen|CTA-Zeile:\s*Zur Warteliste/i.test(
+          output,
+        ));
+    if (needsStructuralRepair) {
+      res.setHeader("x-gle-structural-repair", "1");
 
-if (needsStructuralRepair) {
-  res.setHeader("x-gle-structural-repair", "1");
-
-  const repairPrompt = `
+      const repairPrompt = `
 Du bist ein strenger deutscher SaaS-Copy-Editor.
 
 Schreibe den Content KOMPLETT NEU.
@@ -1678,168 +1848,185 @@ ${output}
 Gib nur den finalen reparierten Content aus.
 `.trim();
 
-  output = await callOpenAI({
-    apiKey: apiKeyToUse,
-    model: modelToUse,
-    prompt: repairPrompt,
-    temperature: 0.3,
-  });
-}
+      output = await callOpenAI({
+        apiKey: apiKeyToUse,
+        model: modelToUse,
+        prompt: repairPrompt,
+        temperature: 0.3,
+      });
+    }
 
-// 2) Bouncer rewrite loop
-if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
-  for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
-    const hits = findStemViolations(output);
-    if (!hits.length) break;
+    // 2) Bouncer rewrite loop
+    if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
+      for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
+        const hits = findStemViolations(output);
+        if (!hits.length) break;
 
-    const repair = buildRepairPrompt({
-      badOutput: output,
-      hits,
-      useCase,
-      tone,
-      topic,
-      extra,
-      outLang,
-    });
+        const repair = buildRepairPrompt({
+          badOutput: output,
+          hits,
+          useCase,
+          tone,
+          topic,
+          extra,
+          outLang,
+        });
 
-    output = await callOpenAI({
-      apiKey: apiKeyToUse,
-      model: modelToUse,
-      prompt: repair,
-      temperature: 0.0,
-    });
-  }
-}
+        output = await callOpenAI({
+          apiKey: apiKeyToUse,
+          model: modelToUse,
+          prompt: repair,
+          temperature: 0.0,
+        });
+      }
+    }
 
-// Social Post: strict 6 lines OR deterministic fallback
-if (isSocial) {
-  output = stripMarkdownArtifacts(output);
+    // Social Post: strict 6 lines OR deterministic fallback
+    if (isSocial) {
+      output = stripMarkdownArtifacts(output);
 
-  if (!validateSocialPost(output)) {
-    output = buildSocialFallback({ outLang, topic });
-  } else {
-    output = output
-      .trim()
-      .split("\n")
-      .map((l) => l.trimEnd())
-      .slice(0, 6)
-      .join("\n");
-  }
+      if (!validateSocialPost(output)) {
+        output = buildSocialFallback({ outLang, topic });
+      } else {
+        output = output
+          .trim()
+          .split("\n")
+          .map((l) => l.trimEnd())
+          .slice(0, 6)
+          .join("\n");
+      }
 
-  res.setHeader("x-gle-social", "1");
-  res.setHeader("x-gle-social-valid", String(validateSocialPost(output)));
-} else {
-  res.setHeader("x-gle-social", "0");
+      res.setHeader("x-gle-social", "1");
+      res.setHeader("x-gle-social-valid", String(validateSocialPost(output)));
+    } else {
+      res.setHeader("x-gle-social", "0");
 
-  // last-mile only for NON-social
-  output = normalizeCtaLabel(output, extra);
-  output = forceNeutralCTA(output, extra);
-  output = hardStripHotStems(output);
-}
+      // last-mile only for NON-social
+      output = normalizeCtaLabel(output, extra);
+      output = forceNeutralCTA(output, extra);
+      output = hardStripHotStems(output);
+    }
 
-// Final clean (do NOT flatten lines)
-output = String(output || "")
-  .replace(/\u00A0/g, " ")
-
-  // remove "link in bio"
-  .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
-  .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
-  .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
-  .replace(/\blink\s+in\s+bio\b/gi, "")
-
-  // remove empty CTA labels
-  .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
-
-  // remove duplicated CTA endings
-  .replace(/(CTA-Zeile:\s*[^\n]+)(\n+\1)+/gim, "$1")
-
-  // remove empty bullet lines
-  .replace(/^\s*[-•]\s*$/gim, "")
-
-  // normalize spacing
-  .replace(/[ \t]{2,}/g, " ")
-  .replace(/\s+([,.;:!?])/g, "$1")
-
-  // collapse repeated blank lines
-  .replace(/\n{3,}/g, "\n\n")
-
-  // cleanup weird broken fragments
-  .replace(/\bContent erstellen\.\b/gi, "Inhalte erstellen")
-  .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
-  .replace(
-    /\bTeil der ersten Inhalte erstellen werden\b/gi,
-    "Teil der Early-Access-Phase werden",
-  )
-  .replace(
-    /\bTeil der ersten Content erstellen werden\b/gi,
-    "Teil der Early-Access-Phase werden",
-  )
-
-  .trim();
-
-// --------------------
-// FINAL LANDINGPAGE FORMAT FIX — ganz am Ende
-// --------------------
-if (!isSocial) {
-  const looksLikeNumberedLanding =
-    /^\s*1\)/m.test(output) &&
-    /^\s*2\)/m.test(output) &&
-    /^\s*3\)/m.test(output);
-
-  if (looksLikeNumberedLanding) {
-    res.setHeader("x-gle-format-fix", "1");
-
+    // Final clean (do NOT flatten lines)
     output = String(output || "")
+      .replace(/\u00A0/g, " ")
 
-      // 3) Inline-Bullets sauber in echte Bullet-Liste umwandeln
-      .replace(/^\s*3\)\s*((?:[-•]\s*.+)+)$/gim, (match, rest) => {
-        const items = String(rest || "")
-          .replace(/^\s*[-•]\s*/, "")
-          .split(/\s+[-•]\s*/)
-          .map((x) => x.trim())
-          .filter(Boolean);
+      // remove "link in bio"
+      .replace(/^\s*link\s+in\s+(?:der\s+|meiner\s+)?bio\s*$/gim, "")
+      .replace(/^\s*link\s+in\s+bio\s*$/gim, "")
+      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+      .replace(/\blink\s+in\s+bio\b/gi, "")
 
-        if (!items.length) return match;
+      // remove empty CTA labels
+      .replace(/\n\s*CTA(?:-Zeile)?\s*:\s*$/gim, "")
 
-        return `3) Bulletpoints:\n- ${items.join("\n- ")}`;
-      })
+      // remove duplicated CTA endings
+      .replace(/(CTA-Zeile:\s*[^\n]+)(\n+\1)+/gim, "$1")
 
-      // 3) leer -> 3) Bulletpoints:
-      .replace(/^\s*3\)\s*$/gim, "3) Bulletpoints:")
+      // remove empty bullet lines
+      .replace(/^\s*[-•]\s*$/gim, "")
 
-      // 4) irgendwas -> saubere CTA-Zeile
-      .replace(
-        /^\s*4\)\s*(?!CTA-Zeile:).+$/gim,
-        "4) CTA-Zeile: Zur Warteliste.",
-      )
-
-      // doppelte CTA-Zeile am Ende entfernen
-      .replace(/\n+\s*CTA-Zeile:\s*Zur Warteliste\.\s*$/gim, "")
-
-      // kaputte Fragmente entfernen
-      .replace(/\bWer kann es Inhalte erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
-      .replace(/\bWer kann es Content erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
-      .replace(/\bWer kann .* Inhalte erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
-      .replace(/\bWer kann .* Content erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?")
-      .replace(/\bGLE Prompt Studio Inhalte erstellen\b/gi, "GLE Prompt Studio ist ein")
-      .replace(/\bGLE Prompt Studio Content erstellen\b/gi, "GLE Prompt Studio ist ein")
-      .replace(/\bTool Inhalte erstellen\b/gi, "Tool nutzen")
-      .replace(/\bTool Content erstellen\b/gi, "Tool nutzen")
-
-      // Sie-Form vermeiden
-      .replace(/\bIhnen\b/g, "dir")
-      .replace(/\bIhren\b/g, "deinen")
-      .replace(/\bIhre\b/g, "deine")
-      .replace(/\bIhr\b/g, "dein")
-      .replace(/\bSie\b/g, "du")
-
-      // letzte Glättung
+      // normalize spacing
       .replace(/[ \t]{2,}/g, " ")
       .replace(/\s+([,.;:!?])/g, "$1")
+
+      // collapse repeated blank lines
       .replace(/\n{3,}/g, "\n\n")
+
+      // cleanup weird broken fragments
+      .replace(/\bContent erstellen\.\b/gi, "Inhalte erstellen")
+      .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
+      .replace(
+        /\bTeil der ersten Inhalte erstellen werden\b/gi,
+        "Teil der Early-Access-Phase werden",
+      )
+      .replace(
+        /\bTeil der ersten Content erstellen werden\b/gi,
+        "Teil der Early-Access-Phase werden",
+      )
+
       .trim();
-  }
-}
+
+    // --------------------
+    // FINAL LANDINGPAGE FORMAT FIX — ganz am Ende
+    // --------------------
+    if (!isSocial) {
+      const looksLikeNumberedLanding =
+        /^\s*1\)/m.test(output) &&
+        /^\s*2\)/m.test(output) &&
+        /^\s*3\)/m.test(output);
+
+      if (looksLikeNumberedLanding) {
+        res.setHeader("x-gle-format-fix", "1");
+
+        output = String(output || "")
+          // 3) Inline-Bullets sauber in echte Bullet-Liste umwandeln
+          .replace(/^\s*3\)\s*((?:[-•]\s*.+)+)$/gim, (match, rest) => {
+            const items = String(rest || "")
+              .replace(/^\s*[-•]\s*/, "")
+              .split(/\s+[-•]\s*/)
+              .map((x) => x.trim())
+              .filter(Boolean);
+
+            if (!items.length) return match;
+
+            return `3) Bulletpoints:\n- ${items.join("\n- ")}`;
+          })
+
+          // 3) leer -> 3) Bulletpoints:
+          .replace(/^\s*3\)\s*$/gim, "3) Bulletpoints:")
+
+          // 4) irgendwas -> saubere CTA-Zeile
+          .replace(
+            /^\s*4\)\s*(?!CTA-Zeile:).+$/gim,
+            "4) CTA-Zeile: Zur Warteliste.",
+          )
+
+          // doppelte CTA-Zeile am Ende entfernen
+          .replace(/\n+\s*CTA-Zeile:\s*Zur Warteliste\.\s*$/gim, "")
+
+          // kaputte Fragmente entfernen
+          .replace(
+            /\bWer kann es Inhalte erstellen\?/gi,
+            "Für wen ist GLE Prompt Studio gedacht?",
+          )
+          .replace(
+            /\bWer kann es Content erstellen\?/gi,
+            "Für wen ist GLE Prompt Studio gedacht?",
+          )
+          .replace(
+            /\bWer kann .* Inhalte erstellen\?/gi,
+            "Für wen ist GLE Prompt Studio gedacht?",
+          )
+          .replace(
+            /\bWer kann .* Content erstellen\?/gi,
+            "Für wen ist GLE Prompt Studio gedacht?",
+          )
+          .replace(
+            /\bGLE Prompt Studio Inhalte erstellen\b/gi,
+            "GLE Prompt Studio ist ein",
+          )
+          .replace(
+            /\bGLE Prompt Studio Content erstellen\b/gi,
+            "GLE Prompt Studio ist ein",
+          )
+          .replace(/\bTool Inhalte erstellen\b/gi, "Tool nutzen")
+          .replace(/\bTool Content erstellen\b/gi, "Tool nutzen")
+
+          // Sie-Form vermeiden
+          .replace(/\bIhnen\b/g, "dir")
+          .replace(/\bIhren\b/g, "deinen")
+          .replace(/\bIhre\b/g, "deine")
+          .replace(/\bIhr\b/g, "dein")
+          .replace(/\bSie\b/g, "du")
+
+          // letzte Glättung
+          .replace(/[ \t]{2,}/g, " ")
+          .replace(/\s+([,.;:!?])/g, "$1")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+      }
+    }
 
     if (shouldBurnTrial) {
       markTrial(acc);
