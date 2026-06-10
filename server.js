@@ -1026,25 +1026,7 @@ function cleanLine(value, fallback = "") {
     .replace(/\s+/g, " ")
     .trim();
 
-  function cleanLandingOutput(output) {
-    return String(output || "")
-      .split("\n")
-      .map((line) => {
-        const bullet = line.match(/^(\s*[-•]\s+)(.*)$/);
-
-        if (bullet) {
-          return `${bullet[1]}${cleanLine(bullet[2])}`;
-        }
-
-        return cleanLine(line);
-      })
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
-
   const replacements = [
-    // harte Hype-Wörter / Stämme
     [/\brevolution\w*\b/gi, "strukturiert"],
     [/\bblitzschnell\w*\b/gi, "schnell"],
     [/\bmagisch\w*\b/gi, "klar"],
@@ -1055,7 +1037,6 @@ function cleanLine(value, fallback = "") {
     [/\bperfekt\b/gi, "geeignet"],
     [/\bgarantiert\w*\b/gi, ""],
 
-    // typische Floskeln
     [/\bohne großen Aufwand\b/gi, "ohne unnötige Umwege"],
     [/\bohne Aufwand\b/gi, "ohne unnötige Umwege"],
     [/\bim Handumdrehen\b/gi, "schneller"],
@@ -1063,91 +1044,73 @@ function cleanLine(value, fallback = "") {
     [/\bmühelos\b/gi, "klar"],
     [/\bansprechende\b/gi, "klare"],
     [/\beffektive\b/gi, "gezielte"],
+    [/\bRekordzeit\b/gi, "klarer Struktur"],
 
-    // bessere SaaS-Formulierungen
-    [
-      /\bGLE Prompt Studio strukturiert die Content-Erstellung\b/gi,
-      "GLE Prompt Studio strukturiert Social Posts, Ads und Landingpages",
-    ],
-    [
-      /\bGLE Prompt Studio liefert schnell\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
-    ],
-    [/\bKI-Tool zur\b/gi, "Tool für"],
+    [/\bGLE Prompt Studio liefert blitzschnell\b/gi, "GLE Prompt Studio erstellt strukturierte Entwürfe für"],
+    [/\bGLE Prompt Studio liefert in Sekunden\b/gi, "GLE Prompt Studio erstellt strukturierte Entwürfe für"],
+    [/\bliefert blitzschnell\b/gi, "erstellt strukturierte Entwürfe für"],
     [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
-    [/\bGeneriere\b/gi, "Erstelle"],
-    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-Entwürfe"],
-    [
-      /\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi,
-      "Tool für strukturierte Marketinginhalte",
-    ],
-    [
-      /\bschnellen Erstellung von Inhalten\b/gi,
-      "strukturierten Erstellung von Inhalten",
-    ],
+    [/\bKI-Tool zur schnellen Content-Erstellung\b/gi, "Tool für strukturierte Content-Erstellung"],
+    [/\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi, "Tool für strukturierte Marketinginhalte"],
+    [/\bKI-Tool zur\b/gi, "Tool für"],
     [/\beffiziente Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
     [/\bschnelle Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
+    [/\bschnelle Erstellung von Inhalten\b/gi, "strukturierte Erstellung von Inhalten"],
     [/\bContent in Sekunden erstellen\b/gi, "Content schneller strukturieren"],
     [/\bContent in Sekunden generieren\b/gi, "Content schneller strukturieren"],
     [/\bSchnelle Erstellung\b/gi, "Strukturierte Erstellung"],
     [/\bErstelle schnell\b/gi, "Erstelle strukturiert"],
     [/\bGeneriere\b/gi, "Erstelle"],
     [/\bDesigne\b/gi, "Entwirf"],
+    [/\bGestalte\b/gi, "Strukturiere"],
     [/\bautomatisierte Prozesse\b/gi, "klare Workflows"],
+    [/\beffiziente Prozesse\b/gi, "klare Workflows"],
+    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-Entwürfe"],
     [/\bHohe Qualität\b/gi, "Konsistentere Textqualität"],
     [/\bhohe Qualität\b/gi, "konsistentere Textqualität"],
     [/\bMinimale Zeitverluste\b/gi, "Weniger Zeitverlust"],
     [/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust"],
     [/\bReduziere Zeitverlust\b/gi, "Reduziert Zeitverlust"],
     [/\bContent-Produktion\b/gi, "Content-Erstellung"],
-    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
-    [/\bGeneriere\b/gi, "Erstelle"],
-    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
-    [/\bGeneriere\b/gi, "Erstelle"],
-    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-Entwürfe"],
-    [
-      /\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi,
-      "Tool für strukturierte Marketinginhalte",
-    ],
-    [
-      /\bschnellen Erstellung von Inhalten\b/gi,
-      "strukturierten Erstellung von Inhalten",
-    ],
 
-    // CTA sauber/neutral
     [/\bjetzt zur Warteliste anmelden\b/gi, "zur Warteliste"],
     [/\bJetzt eintragen\b/gi, "Zur Warteliste"],
+    [/\bjetzt eintragen\b/gi, "Zur Warteliste"],
     [/\bSichere dir\b/gi, "Zur Warteliste"],
     [/\bSei unter den Ersten\b/gi, "Early Access ist geöffnet"],
-    [
-      /\bWarteliste offen:\s*Early Access ist geöffnet\.?/gi,
-      "Warteliste für Early Access geöffnet.",
-    ],
+    [/\bWarteliste offen:\s*Early Access ist geöffnet\.?/gi, "Warteliste für Early Access geöffnet."],
 
-    // kaputte Fragmente
     [/\bContent erstellen\b/gi, "Inhalte erstellen"],
-    [
-      /\bWer kann .* Inhalte erstellen\?/gi,
-      "Für wen ist GLE Prompt Studio gedacht?",
-    ],
-    [
-      /\bWer kann .* Content erstellen\?/gi,
-      "Für wen ist GLE Prompt Studio gedacht?",
-    ],
+    [/\bWer kann .* Inhalte erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?"],
+    [/\bWer kann .* Content erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?"],
   ];
 
   for (const [rx, to] of replacements) {
     s = s.replace(rx, to);
   }
 
-  s = s
+  return s
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
-
-  return s;
 }
 
+function cleanLandingOutput(output) {
+  return String(output || "")
+    .split("\n")
+    .map((line) => {
+      const bullet = line.match(/^(\s*[-•]\s+)(.*)$/);
+
+      if (bullet) {
+        return `${bullet[1]}${cleanLine(bullet[2])}`;
+      }
+
+      return cleanLine(line);
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 function renderLandingpageOutput(data) {
   const headline = cleanLine(data?.headline, "Content schneller erstellen");
   const subheadline = cleanLine(
