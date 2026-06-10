@@ -1026,75 +1026,121 @@ function cleanLine(value, fallback = "") {
     .replace(/\s+/g, " ")
     .trim();
 
-  // Harte SaaS/PRO-Glättung für Landingpage-Renderer
-  s = s
+  function cleanLandingOutput(output) {
+    return String(output || "")
+      .split("\n")
+      .map((line) => {
+        const bullet = line.match(/^(\s*[-•]\s+)(.*)$/);
+
+        if (bullet) {
+          return `${bullet[1]}${cleanLine(bullet[2])}`;
+        }
+
+        return cleanLine(line);
+      })
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  const replacements = [
     // harte Hype-Wörter / Stämme
-    .replace(/\brevolution\w*\b/gi, "strukturiert")
-    .replace(/\bblitzschnell\w*\b/gi, "schnell")
-    .replace(/\bmagisch\w*\b/gi, "klar")
-    .replace(/\bpremium\w*\b/gi, "PRO")
-    .replace(/\bhochwertig\w*\b/gi, "klar")
-    .replace(/\binnovativ\w*\b/gi, "klar strukturiert")
-    .replace(/\bperfekt\b/gi, "geeignet")
-    .replace(/\bperfekt für\b/gi, "geeignet für")
-    .replace(/\bgarantiert\w*\b/gi, "")
+    [/\brevolution\w*\b/gi, "strukturiert"],
+    [/\bblitzschnell\w*\b/gi, "schnell"],
+    [/\bmagisch\w*\b/gi, "klar"],
+    [/\bpremium\w*\b/gi, "PRO"],
+    [/\bhochwertig\w*\b/gi, "klar"],
+    [/\binnovativ\w*\b/gi, "klar strukturiert"],
+    [/\bperfekt für\b/gi, "geeignet für"],
+    [/\bperfekt\b/gi, "geeignet"],
+    [/\bgarantiert\w*\b/gi, ""],
 
     // typische Floskeln
-    .replace(/\bohne großen Aufwand\b/gi, "ohne unnötige Umwege")
-    .replace(/\bohne Aufwand\b/gi, "ohne unnötige Umwege")
-    .replace(/\bim Handumdrehen\b/gi, "schneller")
-    .replace(/\bauf Knopfdruck\b/gi, "mit wenigen Eingaben")
-    .replace(/\bmühelos\b/gi, "klar")
-    .replace(/\bansprechende\b/gi, "klare")
-    .replace(/\beffektive\b/gi, "gezielte")
+    [/\bohne großen Aufwand\b/gi, "ohne unnötige Umwege"],
+    [/\bohne Aufwand\b/gi, "ohne unnötige Umwege"],
+    [/\bim Handumdrehen\b/gi, "schneller"],
+    [/\bauf Knopfdruck\b/gi, "mit wenigen Eingaben"],
+    [/\bmühelos\b/gi, "klar"],
+    [/\bansprechende\b/gi, "klare"],
+    [/\beffektive\b/gi, "gezielte"],
 
     // bessere SaaS-Formulierungen
-    .replace(
+    [
       /\bGLE Prompt Studio strukturiert die Content-Erstellung\b/gi,
       "GLE Prompt Studio strukturiert Social Posts, Ads und Landingpages",
-    )
-    .replace(
+    ],
+    [
       /\bGLE Prompt Studio liefert schnell\b/gi,
       "GLE Prompt Studio erstellt strukturierte Entwürfe für",
-    )
-    .replace(
-      /\bContent in Sekunden erstellen\b/gi,
-      "Content schneller strukturieren",
-    )
-    .replace(
-      /\bContent in Sekunden generieren\b/gi,
-      "Content schneller strukturieren",
-    )
-    .replace(/\bSchnelle Erstellung\b/gi, "Strukturierte Erstellung")
-    .replace(/\bErstelle schnell\b/gi, "Erstelle strukturiert")
-    .replace(/\bGeneriere\b/gi, "Erstelle")
-    .replace(/\bDesigne\b/gi, "Entwirf")
-    .replace(/\bautomatisierte Prozesse\b/gi, "klare Workflows")
-    .replace(/\bHohe Qualität\b/gi, "Konsistentere Textqualität")
-    .replace(/\bhohe Qualität\b/gi, "konsistentere Textqualität")
-    .replace(/\bMinimale Zeitverluste\b/gi, "Weniger Zeitverlust")
-    .replace(/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust")
-    .replace(/\bReduziere Zeitverlust\b/gi, "Reduziert Zeitverlust")
-    .replace(/\bContent-Produktion\b/gi, "Content-Erstellung")
-    .replace(/\bContent-Erstellung\b/gi, "Content-Erstellung")
+    ],
+    [/\bKI-Tool zur\b/gi, "Tool für"],
+    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
+    [/\bGeneriere\b/gi, "Erstelle"],
+    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-Entwürfe"],
+    [
+      /\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi,
+      "Tool für strukturierte Marketinginhalte",
+    ],
+    [
+      /\bschnellen Erstellung von Inhalten\b/gi,
+      "strukturierten Erstellung von Inhalten",
+    ],
+    [/\beffiziente Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
+    [/\bschnelle Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
+    [/\bContent in Sekunden erstellen\b/gi, "Content schneller strukturieren"],
+    [/\bContent in Sekunden generieren\b/gi, "Content schneller strukturieren"],
+    [/\bSchnelle Erstellung\b/gi, "Strukturierte Erstellung"],
+    [/\bErstelle schnell\b/gi, "Erstelle strukturiert"],
+    [/\bGeneriere\b/gi, "Erstelle"],
+    [/\bDesigne\b/gi, "Entwirf"],
+    [/\bautomatisierte Prozesse\b/gi, "klare Workflows"],
+    [/\bHohe Qualität\b/gi, "Konsistentere Textqualität"],
+    [/\bhohe Qualität\b/gi, "konsistentere Textqualität"],
+    [/\bMinimale Zeitverluste\b/gi, "Weniger Zeitverlust"],
+    [/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust"],
+    [/\bReduziere Zeitverlust\b/gi, "Reduziert Zeitverlust"],
+    [/\bContent-Produktion\b/gi, "Content-Erstellung"],
+    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
+    [/\bGeneriere\b/gi, "Erstelle"],
+    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
+    [/\bGeneriere\b/gi, "Erstelle"],
+    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-Entwürfe"],
+    [
+      /\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi,
+      "Tool für strukturierte Marketinginhalte",
+    ],
+    [
+      /\bschnellen Erstellung von Inhalten\b/gi,
+      "strukturierten Erstellung von Inhalten",
+    ],
 
     // CTA sauber/neutral
-    .replace(/\bjetzt zur Warteliste anmelden\b/gi, "zur Warteliste")
-    .replace(/\bJetzt eintragen\b/gi, "Zur Warteliste")
-    .replace(/\bSichere dir\b/gi, "Zur Warteliste")
+    [/\bjetzt zur Warteliste anmelden\b/gi, "zur Warteliste"],
+    [/\bJetzt eintragen\b/gi, "Zur Warteliste"],
+    [/\bSichere dir\b/gi, "Zur Warteliste"],
+    [/\bSei unter den Ersten\b/gi, "Early Access ist geöffnet"],
+    [
+      /\bWarteliste offen:\s*Early Access ist geöffnet\.?/gi,
+      "Warteliste für Early Access geöffnet.",
+    ],
 
     // kaputte Fragmente
-    .replace(/\bContent erstellen\b/gi, "Inhalte erstellen")
-    .replace(
+    [/\bContent erstellen\b/gi, "Inhalte erstellen"],
+    [
       /\bWer kann .* Inhalte erstellen\?/gi,
       "Für wen ist GLE Prompt Studio gedacht?",
-    )
-    .replace(
+    ],
+    [
       /\bWer kann .* Content erstellen\?/gi,
       "Für wen ist GLE Prompt Studio gedacht?",
-    )
+    ],
+  ];
 
-    // Whitespace
+  for (const [rx, to] of replacements) {
+    s = s.replace(rx, to);
+  }
+
+  s = s
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
@@ -1881,13 +1927,76 @@ app.post("/api/generate", async (req, res) => {
 
     // Landingpage/SaaS: JSON vom Modell → Backend rendert festes Format
     if (isLandingPage) {
-      const parsed = extractJsonObject(output);
+      let parsed = extractJsonObject(output);
+
+      // Wenn das Modell kein gültiges JSON liefert: einmal hart als JSON reparieren
+      if (!parsed) {
+        const jsonRepairPrompt = `
+Du hast ungültigen Output geliefert.
+Wandle den folgenden Inhalt in gültiges JSON um.
+Gib ausschließlich JSON aus. Kein Markdown. Keine Erklärung.
+
+JSON-SCHEMA:
+{
+  "headline": "maximal 9 Wörter",
+  "subheadline": "ein natürlicher Satz",
+  "bullets": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5"],
+  "cta": "Zur Warteliste.",
+  "faq": [
+    { "q": "Frage 1", "a": "Antwort 1" },
+    { "q": "Frage 2", "a": "Antwort 2" },
+    { "q": "Frage 3", "a": "Antwort 3" }
+  ]
+}
+
+ALTER OUTPUT:
+${output}
+`.trim();
+
+        const repairedJsonText = await callOpenAI({
+          apiKey: apiKeyToUse,
+          model: modelToUse,
+          prompt: jsonRepairPrompt,
+          temperature: 0.0,
+        });
+
+        parsed = extractJsonObject(repairedJsonText);
+      }
 
       if (parsed) {
         output = renderLandingpageOutput(parsed);
         res.setHeader("x-gle-structured", "landingpage-json");
       } else {
-        res.setHeader("x-gle-structured", "landingpage-json-failed");
+        // Niemals rohen Modelltext ausgeben, wenn Landingpage-JSON fehlschlägt
+        output = renderLandingpageOutput({
+          headline: "Content schneller strukturieren",
+          subheadline:
+            "GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
+          bullets: [
+            "Weniger Zeitverlust bei der Content-Erstellung.",
+            "Klarere Entwürfe für konkrete Kanäle.",
+            "Konsistentere Textqualität über mehrere Formate hinweg.",
+            "Geeignet für Creator und Solopreneure.",
+            "Early Access verfügbar, PRO folgt später.",
+          ],
+          cta: "Zur Warteliste.",
+          faq: [
+            {
+              q: "Was ist GLE Prompt Studio?",
+              a: "Ein Tool für strukturierte Social Posts, Ads und Landingpages.",
+            },
+            {
+              q: "Für wen ist GLE Prompt Studio gedacht?",
+              a: "Für Creator und Solopreneure, die Inhalte klarer vorbereiten möchten.",
+            },
+            {
+              q: "Was kostet GLE Prompt Studio später?",
+              a: "Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.",
+            },
+          ],
+        });
+
+        res.setHeader("x-gle-structured", "landingpage-json-fallback");
       }
     }
 
@@ -2025,6 +2134,10 @@ Gib nur den finalen reparierten Content aus.
         output = forceNeutralCTA(output, extra);
         output = hardStripHotStems(output);
       }
+    }
+
+    if (isLandingPage) {
+      output = cleanLandingOutput(output);
     }
 
     // Final clean (do NOT flatten lines)
