@@ -1045,17 +1045,83 @@ function cleanLine(value, fallback = "") {
     [/\bansprechende\b/gi, "klare"],
     [/\beffektive\b/gi, "gezielte"],
     [/\bRekordzeit\b/gi, "klarer Struktur"],
+    [
+      /\bGLE Prompt Studio bietet Strukturierte Erstellung von\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+    ],
+    [/\bStrukturierte Erstellung\b/g, "strukturierte Erstellung"],
+    [
+      /\bEinfache Erstellung von zielgerichteten Marketingmaterialien\b/gi,
+      "Strukturierte Entwürfe für Social Posts, Ads und Landingpages",
+    ],
+    [
+      /\bSofortiger Zugriff auf kreative Tools\b/gi,
+      "Early Access für Creator und Solopreneure",
+    ],
+    [
+      /\bEin Tool zur schnellen Erstellung von Marketinginhalten\b/gi,
+      "Ein Tool für strukturierte Marketinginhalte",
+    ],
+    [
+      /\bIdeal für Creator und Solopreneure, die effizient arbeiten möchten\b/gi,
+      "Für Creator und Solopreneure, die Inhalte klarer vorbereiten möchten",
+    ],
 
-    [/\bGLE Prompt Studio liefert blitzschnell\b/gi, "GLE Prompt Studio erstellt strukturierte Entwürfe für"],
-    [/\bGLE Prompt Studio liefert in Sekunden\b/gi, "GLE Prompt Studio erstellt strukturierte Entwürfe für"],
+    [
+      /\bGLE Prompt Studio erstellt Social Posts, Ads und Landingpages in Sekunden\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages",
+    ],
+    [
+      /\bErstelle Landingpages, die konvertieren und überzeugen\b/gi,
+      "Erstelle klare Landingpage-Entwürfe für dein Angebot",
+    ],
+    [
+      /\bGLE Prompt Studio ist ein Tool für Erstellung von Marketinginhalten\b/gi,
+      "GLE Prompt Studio ist ein Tool für strukturierte Marketinginhalte",
+    ],
+
+    [
+      /\bGLE Prompt Studio ermöglicht Strukturierte Erstellung von\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+    ],
+    [
+      /\bGLE Prompt Studio ist ein Tool zur schnellen Content-Erstellung\b/gi,
+      "GLE Prompt Studio ist ein Tool für strukturierte Content-Erstellung",
+    ],
+    [
+      /\bWas wird der Preis für GLE Prompt Studio sein\?/gi,
+      "Was kostet GLE Prompt Studio später?",
+    ],
+    [
+      /\bGLE Prompt Studio liefert blitzschnell\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+    ],
+    [
+      /\bGLE Prompt Studio liefert schnell\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+    ],
+    [/\bOptimiere deinen Workflow\b/gi, "Strukturiere deinen Workflow"],
+    [
+      /\bGLE Prompt Studio liefert in Sekunden\b/gi,
+      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+    ],
     [/\bliefert blitzschnell\b/gi, "erstellt strukturierte Entwürfe für"],
     [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
-    [/\bKI-Tool zur schnellen Content-Erstellung\b/gi, "Tool für strukturierte Content-Erstellung"],
-    [/\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi, "Tool für strukturierte Marketinginhalte"],
+    [
+      /\bKI-Tool zur schnellen Content-Erstellung\b/gi,
+      "Tool für strukturierte Content-Erstellung",
+    ],
+    [
+      /\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi,
+      "Tool für strukturierte Marketinginhalte",
+    ],
     [/\bKI-Tool zur\b/gi, "Tool für"],
     [/\beffiziente Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
     [/\bschnelle Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
-    [/\bschnelle Erstellung von Inhalten\b/gi, "strukturierte Erstellung von Inhalten"],
+    [
+      /\bschnelle Erstellung von Inhalten\b/gi,
+      "strukturierte Erstellung von Inhalten",
+    ],
     [/\bContent in Sekunden erstellen\b/gi, "Content schneller strukturieren"],
     [/\bContent in Sekunden generieren\b/gi, "Content schneller strukturieren"],
     [/\bSchnelle Erstellung\b/gi, "Strukturierte Erstellung"],
@@ -1078,11 +1144,20 @@ function cleanLine(value, fallback = "") {
     [/\bjetzt eintragen\b/gi, "Zur Warteliste"],
     [/\bSichere dir\b/gi, "Zur Warteliste"],
     [/\bSei unter den Ersten\b/gi, "Early Access ist geöffnet"],
-    [/\bWarteliste offen:\s*Early Access ist geöffnet\.?/gi, "Warteliste für Early Access geöffnet."],
+    [
+      /\bWarteliste offen:\s*Early Access ist geöffnet\.?/gi,
+      "Warteliste für Early Access geöffnet.",
+    ],
 
     [/\bContent erstellen\b/gi, "Inhalte erstellen"],
-    [/\bWer kann .* Inhalte erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?"],
-    [/\bWer kann .* Content erstellen\?/gi, "Für wen ist GLE Prompt Studio gedacht?"],
+    [
+      /\bWer kann .* Inhalte erstellen\?/gi,
+      "Für wen ist GLE Prompt Studio gedacht?",
+    ],
+    [
+      /\bWer kann .* Content erstellen\?/gi,
+      "Für wen ist GLE Prompt Studio gedacht?",
+    ],
   ];
 
   for (const [rx, to] of replacements) {
@@ -1095,8 +1170,82 @@ function cleanLine(value, fallback = "") {
     .trim();
 }
 
+function renderLandingpageOutput(data) {
+  const headline = cleanLine(data?.headline, "Content klarer vorbereiten");
+
+  const subheadline = cleanLine(
+    data?.subheadline,
+    "GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
+  );
+
+  const fallbackBullets = [
+    "Weniger Zeitverlust bei der Content-Erstellung.",
+    "Konsistentere Textqualität über mehrere Formate hinweg.",
+    "Strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
+    "Klare Ausgangspunkte für Creator und Solopreneure.",
+    "Early Access ist geöffnet, der PRO-Preis liegt später bei 19,99€ pro Monat.",
+  ];
+
+  const rawBullets = Array.isArray(data?.bullets) ? data.bullets : [];
+
+  const bullets = rawBullets
+    .map((b) => cleanLine(b))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  for (const fallback of fallbackBullets) {
+    if (bullets.length >= 5) break;
+    bullets.push(cleanLine(fallback));
+  }
+
+  const cta = cleanLine(data?.cta, "Zur Warteliste.");
+
+  const fallbackFaq = [
+    {
+      q: "Was ist GLE Prompt Studio?",
+      a: "GLE Prompt Studio ist ein Tool für strukturierte Marketinginhalte.",
+    },
+    {
+      q: "Für wen ist GLE Prompt Studio gedacht?",
+      a: "Es richtet sich an Creator und Solopreneure, die Inhalte klarer vorbereiten möchten.",
+    },
+    {
+      q: "Was kostet GLE Prompt Studio später?",
+      a: "Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.",
+    },
+  ];
+
+  const rawFaq = Array.isArray(data?.faq) ? data.faq : [];
+
+  const faq = rawFaq
+    .map((item) => ({
+      q: cleanLine(item?.q || item?.question || ""),
+      a: cleanLine(item?.a || item?.answer || ""),
+    }))
+    .filter((item) => item.q && item.a)
+    .slice(0, 3);
+
+  for (const fallback of fallbackFaq) {
+    if (faq.length >= 3) break;
+    faq.push({
+      q: cleanLine(fallback.q),
+      a: cleanLine(fallback.a),
+    });
+  }
+
+  return [
+    `1) ${headline}`,
+    `2) ${subheadline}`,
+    `3) Bulletpoints:`,
+    ...bullets.map((b) => `- ${b}`),
+    `4) CTA-Zeile: ${cta}`,
+    `5) Mini-FAQ:`,
+    ...faq.flatMap((item) => [`- Frage: ${item.q}`, `  Antwort: ${item.a}`]),
+  ].join("\n");
+}
+
 function cleanLandingOutput(output) {
-  return String(output || "")
+  let cleaned = String(output || "")
     .split("\n")
     .map((line) => {
       const bullet = line.match(/^(\s*[-•]\s+)(.*)$/);
@@ -1110,70 +1259,34 @@ function cleanLandingOutput(output) {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-function renderLandingpageOutput(data) {
-  const headline = cleanLine(data?.headline, "Content schneller erstellen");
-  const subheadline = cleanLine(
-    data?.subheadline,
-    "GLE Prompt Studio hilft Creatorn und Solopreneuren bei Social Posts, Ads und Landingpages.",
-  );
 
-  const bulletsRaw = Array.isArray(data?.bullets) ? data.bullets : [];
-  const bullets = bulletsRaw
-    .map((x) => cleanLine(x))
-    .filter(Boolean)
-    .slice(0, 5);
-
-  while (bullets.length < 5) {
-    bullets.push(
-      [
-        "Weniger Zeitverlust bei der Content-Erstellung.",
-        "Klarere Texte für Social Posts, Ads und Landingpages.",
-        "Konsistente Qualität über mehrere Formate hinweg.",
-        "Geeignet für Creator und Solopreneure.",
-        "Early Access verfügbar, PRO folgt später.",
-      ][bullets.length],
+  const weakLandingCopy =
+    /in Sekunden|Sekundenschnelle|sei einer der Ersten|einer der Ersten|automatisierte Content-Erstellung|bessere Conversion|Conversion|konvertieren|überzeugen|Tool für Erstellung|Content für Social Media und Werbung|effizient Inhalte erstellen|Preis wird später/i.test(
+      cleaned,
     );
+
+  if (!weakLandingCopy) {
+    return cleaned;
   }
 
-  const cta = cleanLine(data?.cta, "Zur Warteliste.");
-
-  const faqRaw = Array.isArray(data?.faq) ? data.faq : [];
-  const faq = faqRaw
-    .map((item) => ({
-      q: cleanLine(item?.q || item?.question),
-      a: cleanLine(item?.a || item?.answer),
-    }))
-    .filter((item) => item.q && item.a)
-    .slice(0, 3);
-
-  while (faq.length < 3) {
-    const fallbacks = [
-      {
-        q: "Was ist GLE Prompt Studio?",
-        a: "Ein Tool für schnellere Social Posts, Ads und Landingpages.",
-      },
-      {
-        q: "Für wen ist GLE Prompt Studio gedacht?",
-        a: "Für Creator und Solopreneure, die klarere Inhalte erstellen möchten.",
-      },
-      {
-        q: "Was kostet GLE Prompt Studio später?",
-        a: "Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.",
-      },
-    ];
-    faq.push(fallbacks[faq.length]);
-  }
-
-  return [
-    `1) ${headline}`,
-    `2) ${subheadline}`,
-    `3) Bulletpoints:`,
-    ...bullets.map((b) => `- ${b}`),
-    `4) CTA-Zeile: ${cta}`,
-    `5) Mini-FAQ:`,
-    ...faq.flatMap((item) => [`- Frage: ${item.q}`, `  Antwort: ${item.a}`]),
-  ].join("\n");
+  return `
+1) Content klarer vorbereiten
+2) GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages.
+3) Bulletpoints:
+- Weniger Zeitverlust bei der Content-Erstellung.
+- Konsistentere Textqualität über mehrere Formate hinweg.
+- Strukturierte Entwürfe für Social Posts, Ads und Landingpages.
+- Klare Ausgangspunkte für Creator und Solopreneure.
+- Early Access ist geöffnet, der PRO-Preis liegt später bei 19,99€ pro Monat.
+4) CTA-Zeile: Zur Warteliste.
+5) Mini-FAQ:
+- Frage: Was ist GLE Prompt Studio?
+  Antwort: GLE Prompt Studio ist ein Tool für strukturierte Marketinginhalte.
+- Frage: Für wen ist GLE Prompt Studio gedacht?
+  Antwort: Es richtet sich an Creator und Solopreneure, die Inhalte klarer vorbereiten möchten.
+- Frage: Was kostet GLE Prompt Studio später?
+  Antwort: Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.
+`.trim();
 }
 
 function buildLandingpageJsonPrompt({ useCase, tone, topic, extra, outLang }) {
