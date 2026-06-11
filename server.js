@@ -2288,7 +2288,7 @@ Gib nur den finalen reparierten Content aus.
     // --------------------
     // FINAL LANDINGPAGE FORMAT FIX — ganz am Ende
     // --------------------
-    if (!isSocial && !isLandingPage) {
+    if (!isSocial && !isLandingPage && !isLinkedInPost) {
       const looksLikeNumberedLanding =
         /^\s*1\)/m.test(output) &&
         /^\s*2\)/m.test(output) &&
