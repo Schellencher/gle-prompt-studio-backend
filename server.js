@@ -948,6 +948,33 @@ function stripMarkdownArtifacts(s = "") {
   return out;
 }
 
+function buildLinkedInFallback({ outLang, topic }) {
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (isEn) {
+    return [
+      "1) Good content needs structure, not more pressure.",
+      "2) GLE Prompt Studio helps creators and solopreneurs prepare social posts, ads and landing pages faster.",
+      "3)",
+      "- Spend less time preparing content.",
+      "- Keep formats clearer and easier to repeat.",
+      "- Maintain more consistent quality across outputs.",
+      "4) Better content starts with a clearer starting point.",
+      "5) Join the waitlist.",
+    ].join("\n");
+  }
+
+  return [
+    "1) Content braucht Struktur, nicht mehr Druck.",
+    "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages schneller vorzubereiten.",
+    "3)",
+    "- Weniger Zeitverlust bei der Content-Erstellung.",
+    "- Klarere Struktur für wiederholbare Formate.",
+    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+    "4) Gute Inhalte entstehen leichter, wenn der Startpunkt klar ist.",
+    "5) Zur Warteliste.",
+  ].join("\n");
+}
 function validateSocialPost(output) {
   const lines = String(output || "")
     .trim()
