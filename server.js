@@ -2031,7 +2031,10 @@ app.post("/api/generate", async (req, res) => {
       useCaseNorm.includes("saas");
 
     const isLinkedInPost =
-      useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
+      useCaseNorm.includes("linkedin") ||
+      String(useCase || "").toLowerCase().includes("linkedin") ||
+      String(topic || "").toLowerCase().includes("linkedin") ||
+      String(extra || "").toLowerCase().includes("linkedin");
 
     const masterPrompt = isLandingPage
       ? buildLandingpageJsonPrompt({
@@ -2241,8 +2244,14 @@ Gib nur den finalen reparierten Content aus.
       }
     }
 
+    // LinkedIn Post: deterministic beta fallback
+    if (isLinkedInPost) {
+      output = buildLinkedInFallback({ outLang, topic });
+      res.setHeader("x-gle-linkedin", "1");
+    }
+
     // Social Post: strict 6 lines OR deterministic fallback
-    if (isSocial) {
+    else if (isSocial) {
       output = stripMarkdownArtifacts(output);
 
       if (!validateSocialPost(output) || socialLooksWeak(output)) {
