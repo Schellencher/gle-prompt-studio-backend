@@ -1300,24 +1300,22 @@ function renderLandingpageOutput(data, outLang = "de") {
   ].join("\n");
 }
 
-return `
-1) Content klarer vorbereiten
-2) GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages.
-3) Bulletpoints:
-- Weniger Zeitverlust bei der Content-Erstellung.
-- Konsistentere Textqualität über mehrere Formate hinweg.
-- Strukturierte Entwürfe für Social Posts, Ads und Landingpages.
-- Klare Ausgangspunkte für Creator und Solopreneure.
-- Early Access ist geöffnet, der PRO-Preis liegt später bei 19,99€ pro Monat.
-4) CTA-Zeile: Zur Warteliste.
-5) Mini-FAQ:
-- Frage: Was ist GLE Prompt Studio?
-  Antwort: GLE Prompt Studio ist ein Tool für strukturierte Marketinginhalte.
-- Frage: Für wen ist GLE Prompt Studio gedacht?
-  Antwort: Es richtet sich an Creator und Solopreneure, die Inhalte klarer vorbereiten möchten.
-- Frage: Was kostet GLE Prompt Studio später?
-  Antwort: Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.
-`.trim();
+function cleanLandingOutput(output) {
+  return String(output || "")
+    .split("\n")
+    .map((line) => {
+      const bullet = line.match(/^(\s*[-•]\s+)(.*)$/);
+
+      if (bullet) {
+        return `${bullet[1]}${cleanLine(bullet[2])}`;
+      }
+
+      return cleanLine(line);
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 function buildLandingpageJsonPrompt({ useCase, tone, topic, extra, outLang }) {
   const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
