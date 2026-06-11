@@ -948,6 +948,37 @@ function stripMarkdownArtifacts(s = "") {
   return out;
 }
 
+function buildProductDescriptionFallback({ outLang, topic }) {
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (isEn) {
+    return [
+      "1) GLE Prompt Studio",
+      "2) An AI tool that helps creators and solopreneurs prepare social posts, ads and landing pages faster.",
+      "3) Benefits:",
+      "- Faster content preparation.",
+      "- Clearer structure for repeatable formats.",
+      "- More consistent quality across outputs.",
+      "- Built for creators and solopreneurs.",
+      "- Early Access is open, future price: 19.99€/month.",
+      "4) Best suited for creators and solopreneurs who want to save time when preparing content.",
+      "5) Join the waitlist.",
+    ].join("\n");
+  }
+
+  return [
+    "1) GLE Prompt Studio",
+    "2) Ein KI-Tool, das Creatorn und Solopreneuren hilft, Social Posts, Ads und Landingpages schneller vorzubereiten.",
+    "3) Vorteile:",
+    "- Schnellere Content-Vorbereitung.",
+    "- Klarere Struktur für wiederholbare Formate.",
+    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+    "- Für Creator und Solopreneure entwickelt.",
+    "- Early Access ist geöffnet, späterer Preis: 19,99€/Monat.",
+    "4) Geeignet für Creator und Solopreneure, die bei der Content-Vorbereitung Zeit sparen wollen.",
+    "5) Zur Warteliste.",
+  ].join("\n");
+}
 function buildLinkedInFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2033,6 +2064,12 @@ app.post("/api/generate", async (req, res) => {
     const isLinkedInPost =
       useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
 
+    const isProductDescription =
+      useCaseNorm.includes("produkt") ||
+      useCaseNorm.includes("product") ||
+      String(extra || "").toLowerCase().includes("produktbeschreibung") ||
+      String(extra || "").toLowerCase().includes("product description");
+
     const masterPrompt = isLandingPage
       ? buildLandingpageJsonPrompt({
           useCase: String(useCase || "").trim(),
@@ -2241,8 +2278,14 @@ Gib nur den finalen reparierten Content aus.
       }
     }
 
+    // Product Description: deterministic beta fallback
+    if (isProductDescription) {
+      output = buildProductDescriptionFallback({ outLang, topic });
+      res.setHeader("x-gle-product", "1");
+    }
+
     // LinkedIn Post: deterministic beta fallback
-    if (isLinkedInPost) {
+    else if (isLinkedInPost) {
       output = buildLinkedInFallback({ outLang, topic });
       res.setHeader("x-gle-linkedin", "1");
     }
@@ -2324,7 +2367,7 @@ Gib nur den finalen reparierten Content aus.
     // --------------------
     // FINAL LANDINGPAGE FORMAT FIX — ganz am Ende
     // --------------------
-    if (!isSocial && !isLandingPage && !isLinkedInPost) {
+    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription) {
       const looksLikeNumberedLanding =
         /^\s*1\)/m.test(output) &&
         /^\s*2\)/m.test(output) &&
