@@ -967,32 +967,25 @@ function validateSocialPost(output) {
 
 function buildSocialFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
-  const hasBeta = /beta|early access|warteliste|waitlist/i.test(
-    String(topic || ""),
-  );
 
   if (isEn) {
     return [
-      "From the outside, it looks quiet.",
-      "- Core logic was tightened in the background.",
-      "- Limits and guardrails were refined.",
-      "- The payment flow was stabilized further.",
-      "- The technical base was hardened step by step.",
-      hasBeta
-        ? "Reply with BETA and I’ll send you the access details."
-        : "Reply if you want the next update.",
+      "Create content with more structure.",
+      "- Draft social posts, ads and landing pages faster.",
+      "- Spend less time preparing content.",
+      "- Keep formats clear and easy to repeat.",
+      "- Maintain consistent quality across outputs.",
+      "Join the waitlist.",
     ].join("\n");
   }
 
   return [
-    "Von außen wirkt es ruhig.",
-    "- Plan-Logik im Hintergrund stabilisiert.",
-    "- Limits und Guardrails nachgeschärft.",
-    "- Zahlungs-Flow robuster synchronisiert.",
-    "- Technische Basis weiter gehärtet.",
-    hasBeta
-      ? "Kommentiere BETA, dann schicke ich dir den Zugang."
-      : "Kommentiere UPDATE, wenn du den nächsten Stand sehen willst.",
+    "Content klarer vorbereiten.",
+    "- Entwürfe für Social Posts, Ads und Landingpages schneller vorbereiten.",
+    "- Weniger Zeitverlust bei der Content-Erstellung.",
+    "- Formate klarer und wiederholbarer halten.",
+    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+    "Zur Warteliste.",
   ].join("\n");
 }
 
