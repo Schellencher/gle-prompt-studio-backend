@@ -965,6 +965,11 @@ function validateSocialPost(output) {
   return true;
 }
 
+function socialLooksWeak(output) {
+  const s = String(output || "");
+
+  return /Windeseile|Hohe Qualität|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
+}
 function buildSocialFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2210,7 +2215,7 @@ Gib nur den finalen reparierten Content aus.
     if (isSocial) {
       output = stripMarkdownArtifacts(output);
 
-      if (!validateSocialPost(output)) {
+      if (!validateSocialPost(output) || socialLooksWeak(output)) {
         output = buildSocialFallback({ outLang, topic });
       } else {
         output = output
