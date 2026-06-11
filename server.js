@@ -2031,10 +2031,7 @@ app.post("/api/generate", async (req, res) => {
       useCaseNorm.includes("saas");
 
     const isLinkedInPost =
-      useCaseNorm.includes("linkedin") ||
-      String(useCase || "").toLowerCase().includes("linkedin") ||
-      String(topic || "").toLowerCase().includes("linkedin") ||
-      String(extra || "").toLowerCase().includes("linkedin");
+      useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
 
     const masterPrompt = isLandingPage
       ? buildLandingpageJsonPrompt({
