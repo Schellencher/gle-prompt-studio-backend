@@ -2003,6 +2003,9 @@ app.post("/api/generate", async (req, res) => {
       useCaseNorm.includes("ad-copy") ||
       useCaseNorm.includes("saas");
 
+    const isLinkedInPost =
+      useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
+
     const masterPrompt = isLandingPage
       ? buildLandingpageJsonPrompt({
           useCase: String(useCase || "").trim(),
