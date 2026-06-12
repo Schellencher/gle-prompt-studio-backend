@@ -1,7 +1,7 @@
-"use strict";
+﻿"use strict";
 
 /**
- * GLE Prompt Studio Backend — CLEAN FINAL (v2.2)
+ * GLE Prompt Studio Backend â€” CLEAN FINAL (v2.2)
  *
  * Features:
  * - BYOK + PRO(Server-Key) + optional BYOK_ONLY
@@ -346,7 +346,7 @@ function getIds(req) {
 
   const userId = String(
     h["x-gle-user-id"] ||
-      h["x-gle-user"] || // fallback für Frontend-Bug
+      h["x-gle-user"] || // fallback fÃ¼r Frontend-Bug
       h["x-user-id"] ||
       "",
   ).trim();
@@ -477,7 +477,7 @@ function markTrial(account) {
 }
 
 // ===============================
-// BOUNCER v2 — server-side quality gate
+// BOUNCER v2 â€” server-side quality gate
 // ===============================
 const BOUNCER_ENABLED = String(process.env.BOUNCER_ENABLED || "0") === "1";
 const BOUNCER_MAX_PASSES = Math.max(
@@ -520,10 +520,10 @@ const DEFAULT_BANNED_STEMS = [
 function _normalizeForScan(input) {
   let s = String(input || "").toLowerCase();
   s = s
-    .replace(/ä/g, "ae")
-    .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
-    .replace(/ß/g, "ss");
+    .replace(/Ã¤/g, "ae")
+    .replace(/Ã¶/g, "oe")
+    .replace(/Ã¼/g, "ue")
+    .replace(/ÃŸ/g, "ss");
   s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   s = s
     .replace(/[^a-z0-9]+/g, " ")
@@ -581,7 +581,7 @@ function findStemViolations(text, stems = ACTIVE_BANNED_STEMS) {
 }
 
 // --------------------
-// CTA + Sanitizer (last mile) — NON-social only
+// CTA + Sanitizer (last mile) â€” NON-social only
 // --------------------
 function detectCtaLabelFromExtra(extra) {
   const s = String(extra || "");
@@ -608,7 +608,7 @@ function forceNeutralCTA(output, extra) {
   const allowed = [
     "Zur Warteliste.",
     "Early Access: Eintragen.",
-    "Warteliste öffnen.",
+    "Warteliste Ã¶ffnen.",
   ];
   const chosen = allowed[0];
 
@@ -811,38 +811,38 @@ function buildMasterPrompt({ useCase, tone, topic, extra, outLang }) {
 
   return `
 Du bist "GLE Prompt Studio".
-Du lieferst FERTIGEN Content. Kein Meta, keine Rückfragen, keine Entschuldigungen.
+Du lieferst FERTIGEN Content. Kein Meta, keine RÃ¼ckfragen, keine Entschuldigungen.
 
 Zielsprache: ${lang}
 Use-Case: ${uc}
 Ton: ${t}
 
 HARTE REGELN:
-- Keine Einleitungssätze ("Hier ist...", "Gerne...", "Es tut mir leid...").
+- Keine EinleitungssÃ¤tze ("Hier ist...", "Gerne...", "Es tut mir leid...").
 - Keine Emojis.
-- Keine Buzzwords/Floskeln wie "hochwertig", "ohne Aufwand", "Premium", "revolutionär".
-- Keine leeren Überschriften, keine leeren Nummernpunkte, keine leeren Bulletpoints.
+- Keine Buzzwords/Floskeln wie "hochwertig", "ohne Aufwand", "Premium", "revolutionÃ¤r".
+- Keine leeren Ãœberschriften, keine leeren Nummernpunkte, keine leeren Bulletpoints.
 - Jede nummerierte Zeile muss Inhalt haben.
-- Wenn ein Format Punkt 1), 2), 3) usw. verlangt, muss jeder Punkt vollständig ausgefüllt sein.
+- Wenn ein Format Punkt 1), 2), 3) usw. verlangt, muss jeder Punkt vollstÃ¤ndig ausgefÃ¼llt sein.
 - CTA nur einmal ausgeben.
-- Wenn im Format bereits "CTA-Zeile" verlangt wird, dann KEINE zusätzliche CTA am Ende anhängen.
+- Wenn im Format bereits "CTA-Zeile" verlangt wird, dann KEINE zusÃ¤tzliche CTA am Ende anhÃ¤ngen.
 - CTA neutral halten, z.B. "Zur Warteliste.", "Early Access: Eintragen.", "Mehr erfahren."
-- FAQ sauber schreiben: Frage und Antwort jeweils vollständig, keine halben Zeilen.
-- Schreibe konkret: was + für wen + Ergebnis, in einfachen Worten.
+- FAQ sauber schreiben: Frage und Antwort jeweils vollstÃ¤ndig, keine halben Zeilen.
+- Schreibe konkret: was + fÃ¼r wen + Ergebnis, in einfachen Worten.
 - Ausgabe: nur der finale Content.
 
-QUALITÄTSREGELN:
+QUALITÃ„TSREGELN:
 - Kein Platzhaltertext.
 - Keine technischen Begriffe wie BYOK, Server-Key, Tokens, Modellname, GPT, API.
-- Keine Sätze über KI oder das Tool selbst, außer das Thema verlangt es ausdrücklich.
+- Keine SÃ¤tze Ã¼ber KI oder das Tool selbst, auÃŸer das Thema verlangt es ausdrÃ¼cklich.
 - Kein "Link in Bio".
 - Kein doppelter CTA.
-- Wenn der Nutzer ein exaktes Format vorgibt, halte dieses Format ein und fülle jeden Punkt vollständig.
+- Wenn der Nutzer ein exaktes Format vorgibt, halte dieses Format ein und fÃ¼lle jeden Punkt vollstÃ¤ndig.
 
 THEMA:
 ${cleanTopic || "(kein Thema angegeben)"}
 
-FORMAT / Anforderungen (exakt einhalten und vollständig ausfüllen):
+FORMAT / Anforderungen (exakt einhalten und vollstÃ¤ndig ausfÃ¼llen):
 ${cleanExtra || "(kein Format vorgegeben)"}
 `.trim();
 }
@@ -909,7 +909,7 @@ ${String(badOutput || "").slice(0, 2000)}
 
   // Default repair for other use-cases
   return `
-Du bist strenger Copy-Editor. Du lieferst FERTIGEN Content – kein Meta, keine Entschuldigungen.
+Du bist strenger Copy-Editor. Du lieferst FERTIGEN Content â€“ kein Meta, keine Entschuldigungen.
 Zielsprache: ${lang}
 Use-Case: ${useCase}
 Ton: ${tone}
@@ -917,15 +917,15 @@ Thema: ${topic}
 
 QUALITY GATE (hart):
 1) Schreibe KOMPLETT NEU. Nicht umformulieren, nichts wiederverwenden.
-2) Keine Einleitungssätze, keine Erklärungen, kein “Hier ist…”.
-3) Keine Entschuldigungen / kein “mir fehlen Infos”.
+2) Keine EinleitungssÃ¤tze, keine ErklÃ¤rungen, kein â€œHier istâ€¦â€.
+3) Keine Entschuldigungen / kein â€œmir fehlen Infosâ€.
 4) Keine Floskeln & kein Marketing-Pathos. Kurz, klar, konkret.
-5) Keine Sie-Ansprache. Nutze “du” ODER neutral ohne Pronomen.
+5) Keine Sie-Ansprache. Nutze â€œduâ€ ODER neutral ohne Pronomen.
 6) VERBOTEN: In deiner finalen Antwort darf KEIN Wortteil aus dieser Liste vorkommen:
 ${bannedAll || "(leer)"}
-7) Treffer im letzten Output waren: ${hitList || "(keine)"} — diese müssen weg.
+7) Treffer im letzten Output waren: ${hitList || "(keine)"} â€” diese mÃ¼ssen weg.
 8) CTA neutral halten. Kein Imperativ.
-9) Wenn ein verbotener Stamm vorkommt: komplett neu schreiben. Nicht erwähnen.
+9) Wenn ein verbotener Stamm vorkommt: komplett neu schreiben. Nicht erwÃ¤hnen.
 
 FORMAT / Anforderungen (exakt einhalten):
 ${extra}
@@ -960,7 +960,7 @@ function buildProductDescriptionFallback({ outLang, topic }) {
       "- Clearer structure for repeatable formats.",
       "- More consistent quality across outputs.",
       "- Built for creators and solopreneurs.",
-      "- Early Access is open, future price: 19.99€/month.",
+      "- Early Access is open, future price: 19.99â‚¬/month.",
       "4) Best suited for creators and solopreneurs who want to save time when preparing content.",
       "5) Join the waitlist.",
     ].join("\n");
@@ -971,11 +971,11 @@ function buildProductDescriptionFallback({ outLang, topic }) {
     "2) Ein KI-Tool, das Creatorn und Solopreneuren hilft, Social Posts, Ads und Landingpages schneller vorzubereiten.",
     "3) Vorteile:",
     "- Schnellere Content-Vorbereitung.",
-    "- Klarere Struktur für wiederholbare Formate.",
-    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
-    "- Für Creator und Solopreneure entwickelt.",
-    "- Early Access ist geöffnet, späterer Preis: 19,99€/Monat.",
-    "4) Geeignet für Creator und Solopreneure, die bei der Content-Vorbereitung Zeit sparen wollen.",
+    "- Klarere Struktur fÃ¼r wiederholbare Formate.",
+    "- Konsistentere QualitÃ¤t Ã¼ber mehrere Ausgaben hinweg.",
+    "- FÃ¼r Creator und Solopreneure entwickelt.",
+    "- Early Access ist geÃ¶ffnet, spÃ¤terer Preis: 19,99â‚¬/Monat.",
+    "4) Geeignet fÃ¼r Creator und Solopreneure, die bei der Content-Vorbereitung Zeit sparen wollen.",
     "5) Zur Warteliste.",
   ].join("\n");
 }
@@ -1000,8 +1000,8 @@ function buildLinkedInFallback({ outLang, topic }) {
     "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages schneller vorzubereiten.",
     "3)",
     "- Weniger Zeitverlust bei der Content-Erstellung.",
-    "- Klarere Struktur für wiederholbare Formate.",
-    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+    "- Klarere Struktur fÃ¼r wiederholbare Formate.",
+    "- Konsistentere QualitÃ¤t Ã¼ber mehrere Ausgaben hinweg.",
     "4) Gute Inhalte entstehen leichter, wenn der Startpunkt klar ist.",
     "5) Zur Warteliste.",
   ].join("\n");
@@ -1026,7 +1026,36 @@ function validateSocialPost(output) {
 function socialLooksWeak(output) {
   const s = String(output || "");
 
-  return /Windeseile|Hohe Qualität|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
+  return /Windeseile|Hohe QualitÃ¤t|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
+}
+function buildEmailFallback({ outLang, topic }) {
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (isEn) {
+    return [
+      "1) Subject: GLE Prompt Studio Early Access is now open",
+      "2) Opening sentence: The waitlist for GLE Prompt Studio is now open.",
+      "3) Short main text: GLE Prompt Studio helps creators and solopreneurs prepare social posts, ads and landing pages faster. It gives content a clearer starting point, repeatable formats and more consistent quality.",
+      "4) Benefits:",
+      "- Spend less time preparing content.",
+      "- Keep formats clearer and easier to repeat.",
+      "- Create more consistent quality across multiple outputs.",
+      "5) CTA: Join the waitlist.",
+      "6) Closing sentence: Early Access is open, and the future price will be 19.99€/month.",
+    ].join("\n");
+  }
+
+  return [
+    "1) Betreff: GLE Prompt Studio Early Access ist jetzt offen",
+    "2) Einstiegssatz: Die Warteliste für GLE Prompt Studio ist jetzt geöffnet.",
+    "3) Kurzer Haupttext: GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages schneller vorzubereiten. So bekommen Inhalte einen klareren Startpunkt, wiederholbare Formate und konsistentere Qualität.",
+    "4) Vorteile:",
+    "- Weniger Zeitverlust bei der Content-Erstellung.",
+    "- Klarere Struktur für wiederholbare Formate.",
+    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+    "5) CTA: Zur Warteliste.",
+    "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
+  ].join("\n");
 }
 function buildSocialFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
@@ -1044,10 +1073,10 @@ function buildSocialFallback({ outLang, topic }) {
 
   return [
     "Content klarer vorbereiten.",
-    "- Entwürfe für Social Posts, Ads und Landingpages schneller vorbereiten.",
+    "- EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages schneller vorbereiten.",
     "- Weniger Zeitverlust bei der Content-Erstellung.",
     "- Formate klarer und wiederholbarer halten.",
-    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+    "- Konsistentere QualitÃ¤t Ã¼ber mehrere Ausgaben hinweg.",
     "Zur Warteliste.",
   ].join("\n");
 }
@@ -1078,7 +1107,7 @@ function extractJsonObject(text) {
 function cleanLine(value, fallback = "") {
   let s = String(value || fallback)
     .replace(/\*\*/g, "")
-    .replace(/^\s*[-•]\s*/, "")
+    .replace(/^\s*[-â€¢]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -1089,89 +1118,89 @@ function cleanLine(value, fallback = "") {
     [/\bpremium\w*\b/gi, "PRO"],
     [/\bhochwertig\w*\b/gi, "klar"],
     [/\binnovativ\w*\b/gi, "klar strukturiert"],
-    [/\bperfekt für\b/gi, "geeignet für"],
+    [/\bperfekt fÃ¼r\b/gi, "geeignet fÃ¼r"],
     [/\bperfekt\b/gi, "geeignet"],
     [/\bgarantiert\w*\b/gi, ""],
 
-    [/\bohne großen Aufwand\b/gi, "ohne unnötige Umwege"],
-    [/\bohne Aufwand\b/gi, "ohne unnötige Umwege"],
+    [/\bohne groÃŸen Aufwand\b/gi, "ohne unnÃ¶tige Umwege"],
+    [/\bohne Aufwand\b/gi, "ohne unnÃ¶tige Umwege"],
     [/\bim Handumdrehen\b/gi, "schneller"],
     [/\bauf Knopfdruck\b/gi, "mit wenigen Eingaben"],
-    [/\bmühelos\b/gi, "klar"],
+    [/\bmÃ¼helos\b/gi, "klar"],
     [/\bansprechende\b/gi, "klare"],
     [/\beffektive\b/gi, "gezielte"],
     [/\bRekordzeit\b/gi, "klarer Struktur"],
     [
       /\bGLE Prompt Studio bietet Strukturierte Erstellung von\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+      "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r",
     ],
     [/\bStrukturierte Erstellung\b/g, "strukturierte Erstellung"],
     [
       /\bEinfache Erstellung von zielgerichteten Marketingmaterialien\b/gi,
-      "Strukturierte Entwürfe für Social Posts, Ads und Landingpages",
+      "Strukturierte EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages",
     ],
     [
       /\bSofortiger Zugriff auf kreative Tools\b/gi,
-      "Early Access für Creator und Solopreneure",
+      "Early Access fÃ¼r Creator und Solopreneure",
     ],
     [
       /\bEin Tool zur schnellen Erstellung von Marketinginhalten\b/gi,
-      "Ein Tool für strukturierte Marketinginhalte",
+      "Ein Tool fÃ¼r strukturierte Marketinginhalte",
     ],
     [
-      /\bIdeal für Creator und Solopreneure, die effizient arbeiten möchten\b/gi,
-      "Für Creator und Solopreneure, die Inhalte klarer vorbereiten möchten",
+      /\bIdeal fÃ¼r Creator und Solopreneure, die effizient arbeiten mÃ¶chten\b/gi,
+      "FÃ¼r Creator und Solopreneure, die Inhalte klarer vorbereiten mÃ¶chten",
     ],
 
     [
       /\bGLE Prompt Studio erstellt Social Posts, Ads und Landingpages in Sekunden\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages",
+      "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages",
     ],
     [
-      /\bErstelle Landingpages, die konvertieren und überzeugen\b/gi,
-      "Erstelle klare Landingpage-Entwürfe für dein Angebot",
+      /\bErstelle Landingpages, die konvertieren und Ã¼berzeugen\b/gi,
+      "Erstelle klare Landingpage-EntwÃ¼rfe fÃ¼r dein Angebot",
     ],
     [
-      /\bGLE Prompt Studio ist ein Tool für Erstellung von Marketinginhalten\b/gi,
-      "GLE Prompt Studio ist ein Tool für strukturierte Marketinginhalte",
+      /\bGLE Prompt Studio ist ein Tool fÃ¼r Erstellung von Marketinginhalten\b/gi,
+      "GLE Prompt Studio ist ein Tool fÃ¼r strukturierte Marketinginhalte",
     ],
 
     [
-      /\bGLE Prompt Studio ermöglicht Strukturierte Erstellung von\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+      /\bGLE Prompt Studio ermÃ¶glicht Strukturierte Erstellung von\b/gi,
+      "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r",
     ],
     [
       /\bGLE Prompt Studio ist ein Tool zur schnellen Content-Erstellung\b/gi,
-      "GLE Prompt Studio ist ein Tool für strukturierte Content-Erstellung",
+      "GLE Prompt Studio ist ein Tool fÃ¼r strukturierte Content-Erstellung",
     ],
     [
-      /\bWas wird der Preis für GLE Prompt Studio sein\?/gi,
-      "Was kostet GLE Prompt Studio später?",
+      /\bWas wird der Preis fÃ¼r GLE Prompt Studio sein\?/gi,
+      "Was kostet GLE Prompt Studio spÃ¤ter?",
     ],
     [
       /\bGLE Prompt Studio liefert blitzschnell\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+      "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r",
     ],
     [
       /\bGLE Prompt Studio liefert schnell\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+      "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r",
     ],
     [/\bOptimiere deinen Workflow\b/gi, "Strukturiere deinen Workflow"],
     [
       /\bGLE Prompt Studio liefert in Sekunden\b/gi,
-      "GLE Prompt Studio erstellt strukturierte Entwürfe für",
+      "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r",
     ],
-    [/\bliefert blitzschnell\b/gi, "erstellt strukturierte Entwürfe für"],
-    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte Entwürfe für"],
+    [/\bliefert blitzschnell\b/gi, "erstellt strukturierte EntwÃ¼rfe fÃ¼r"],
+    [/\bliefert in Sekunden\b/gi, "erstellt strukturierte EntwÃ¼rfe fÃ¼r"],
     [
       /\bKI-Tool zur schnellen Content-Erstellung\b/gi,
-      "Tool für strukturierte Content-Erstellung",
+      "Tool fÃ¼r strukturierte Content-Erstellung",
     ],
     [
       /\bKI-Tool zur schnellen Erstellung von Inhalten\b/gi,
-      "Tool für strukturierte Marketinginhalte",
+      "Tool fÃ¼r strukturierte Marketinginhalte",
     ],
-    [/\bKI-Tool zur\b/gi, "Tool für"],
+    [/\bKI-Tool zur\b/gi, "Tool fÃ¼r"],
     [/\beffiziente Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
     [/\bschnelle Content-Erstellung\b/gi, "strukturierte Content-Erstellung"],
     [
@@ -1187,9 +1216,9 @@ function cleanLine(value, fallback = "") {
     [/\bGestalte\b/gi, "Strukturiere"],
     [/\bautomatisierte Prozesse\b/gi, "klare Workflows"],
     [/\beffiziente Prozesse\b/gi, "klare Workflows"],
-    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-Entwürfe"],
-    [/\bHohe Qualität\b/gi, "Konsistentere Textqualität"],
-    [/\bhohe Qualität\b/gi, "konsistentere Textqualität"],
+    [/\beffiziente Landingpages\b/gi, "strukturierte Landingpage-EntwÃ¼rfe"],
+    [/\bHohe QualitÃ¤t\b/gi, "Konsistentere TextqualitÃ¤t"],
+    [/\bhohe QualitÃ¤t\b/gi, "konsistentere TextqualitÃ¤t"],
     [/\bMinimale Zeitverluste\b/gi, "Weniger Zeitverlust"],
     [/\bMinimierung von Zeitverlust\b/gi, "Weniger Zeitverlust"],
     [/\bReduziere Zeitverlust\b/gi, "Reduziert Zeitverlust"],
@@ -1199,20 +1228,20 @@ function cleanLine(value, fallback = "") {
     [/\bJetzt eintragen\b/gi, "Zur Warteliste"],
     [/\bjetzt eintragen\b/gi, "Zur Warteliste"],
     [/\bSichere dir\b/gi, "Zur Warteliste"],
-    [/\bSei unter den Ersten\b/gi, "Early Access ist geöffnet"],
+    [/\bSei unter den Ersten\b/gi, "Early Access ist geÃ¶ffnet"],
     [
-      /\bWarteliste offen:\s*Early Access ist geöffnet\.?/gi,
-      "Warteliste für Early Access geöffnet.",
+      /\bWarteliste offen:\s*Early Access ist geÃ¶ffnet\.?/gi,
+      "Warteliste fÃ¼r Early Access geÃ¶ffnet.",
     ],
 
     [/\bContent erstellen\b/gi, "Inhalte erstellen"],
     [
       /\bWer kann .* Inhalte erstellen\?/gi,
-      "Für wen ist GLE Prompt Studio gedacht?",
+      "FÃ¼r wen ist GLE Prompt Studio gedacht?",
     ],
     [
       /\bWer kann .* Content erstellen\?/gi,
-      "Für wen ist GLE Prompt Studio gedacht?",
+      "FÃ¼r wen ist GLE Prompt Studio gedacht?",
     ],
   ];
 
@@ -1254,7 +1283,7 @@ function renderLandingpageOutput(data, outLang = "de") {
     data?.subheadline,
     isEn
       ? "GLE Prompt Studio creates structured drafts for social posts, ads and landing pages."
-      : "GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
+      : "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages.",
   );
 
   const fallbackBullets = isEn
@@ -1263,14 +1292,14 @@ function renderLandingpageOutput(data, outLang = "de") {
         "Keep content quality more consistent across formats.",
         "Create structured drafts for social posts, ads and landing pages.",
         "Clear starting points for creators and solopreneurs.",
-        "Early Access is open, the future PRO price is 19.99€ per month.",
+        "Early Access is open, the future PRO price is 19.99â‚¬ per month.",
       ]
     : [
         "Weniger Zeitverlust bei der Content-Erstellung.",
-        "Konsistentere Textqualität über mehrere Formate hinweg.",
-        "Strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
-        "Klare Ausgangspunkte für Creator und Solopreneure.",
-        "Early Access ist geöffnet, der PRO-Preis liegt später bei 19,99€ pro Monat.",
+        "Konsistentere TextqualitÃ¤t Ã¼ber mehrere Formate hinweg.",
+        "Strukturierte EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages.",
+        "Klare Ausgangspunkte fÃ¼r Creator und Solopreneure.",
+        "Early Access ist geÃ¶ffnet, der PRO-Preis liegt spÃ¤ter bei 19,99â‚¬ pro Monat.",
       ];
 
   const rawBullets = Array.isArray(data?.bullets) ? data.bullets : [];
@@ -1306,21 +1335,21 @@ function renderLandingpageOutput(data, outLang = "de") {
         },
         {
           q: "What will GLE Prompt Studio cost later?",
-          a: "The planned PRO price is 19.99€ per month.",
+          a: "The planned PRO price is 19.99â‚¬ per month.",
         },
       ]
     : [
         {
           q: "Was ist GLE Prompt Studio?",
-          a: "GLE Prompt Studio ist ein Tool für strukturierte Marketinginhalte.",
+          a: "GLE Prompt Studio ist ein Tool fÃ¼r strukturierte Marketinginhalte.",
         },
         {
-          q: "Für wen ist GLE Prompt Studio gedacht?",
-          a: "Es richtet sich an Creator und Solopreneure, die Inhalte klarer vorbereiten möchten.",
+          q: "FÃ¼r wen ist GLE Prompt Studio gedacht?",
+          a: "Es richtet sich an Creator und Solopreneure, die Inhalte klarer vorbereiten mÃ¶chten.",
         },
         {
-          q: "Was kostet GLE Prompt Studio später?",
-          a: "Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.",
+          q: "Was kostet GLE Prompt Studio spÃ¤ter?",
+          a: "Der geplante PRO-Preis liegt spÃ¤ter bei 19,99â‚¬ pro Monat.",
         },
       ];
 
@@ -1360,7 +1389,7 @@ function cleanLandingOutput(output) {
   return String(output || "")
     .split("\n")
     .map((line) => {
-      const bullet = line.match(/^(\s*[-•]\s+)(.*)$/);
+      const bullet = line.match(/^(\s*[-â€¢]\s+)(.*)$/);
 
       if (bullet) {
         return `${bullet[1]}${cleanLine(bullet[2])}`;
@@ -1377,15 +1406,15 @@ function buildLandingpageJsonPrompt({ useCase, tone, topic, extra, outLang }) {
   const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
 
   return `
-Du bist ein präziser SaaS-Copywriter für digitale Tools.
+Du bist ein prÃ¤ziser SaaS-Copywriter fÃ¼r digitale Tools.
 Du schreibst klare, ruhige, verkaufbare Texte ohne Hype.
 
 WICHTIG:
-Gib ausschließlich gültiges JSON aus.
+Gib ausschlieÃŸlich gÃ¼ltiges JSON aus.
 Kein Markdown.
 Keine Einleitung.
 Keine Kommentare.
-Keine Erklärungen außerhalb des JSON.
+Keine ErklÃ¤rungen auÃŸerhalb des JSON.
 
 Zielsprache: ${lang}
 Use-Case: ${useCase}
@@ -1398,23 +1427,23 @@ ANFORDERUNGEN:
 ${extra}
 
 AUFGABE:
-Erstelle eine SaaS-Hero-Sektion für Early Access / Warteliste.
+Erstelle eine SaaS-Hero-Sektion fÃ¼r Early Access / Warteliste.
 
 Der Text soll:
 - konkret sagen, was das Tool macht
-- klar sagen, für wen es gedacht ist
-- den Zeitgewinn und die bessere Struktur erklären
-- Social Posts, Ads und Landingpages erwähnen, wenn passend
-- natürlich klingen, nicht nach Werbefloskel
+- klar sagen, fÃ¼r wen es gedacht ist
+- den Zeitgewinn und die bessere Struktur erklÃ¤ren
+- Social Posts, Ads und Landingpages erwÃ¤hnen, wenn passend
+- natÃ¼rlich klingen, nicht nach Werbefloskel
 - ruhig, klar und professionell wirken
 
 VERBOTENE FORMULIERUNGEN:
-- mühelos
+- mÃ¼helos
 - ohne Aufwand
 - im Handumdrehen
 - auf Knopfdruck
 - perfekt
-- revolutionär
+- revolutionÃ¤r
 - innovativ
 - hochwertig
 - Premium
@@ -1431,16 +1460,16 @@ SPRACHREGELN:
 - Verwende "du" nur sparsam.
 - Keine Emojis.
 - Keine technischen Begriffe wie GPT, API, Modell, BYOK, Tokens.
-- Keine übertriebenen Versprechen.
+- Keine Ã¼bertriebenen Versprechen.
 - Keine leeren Claims.
 - Jeder Bulletpoint muss einen konkreten Produktbezug haben.
-- FAQ-Fragen müssen natürlich und vollständig sein.
-- Antworten müssen vollständige Sätze sein.
+- FAQ-Fragen mÃ¼ssen natÃ¼rlich und vollstÃ¤ndig sein.
+- Antworten mÃ¼ssen vollstÃ¤ndige SÃ¤tze sein.
 
 JSON-SCHEMA:
 {
-  "headline": "maximal 9 Wörter, konkreter Nutzen, kein Punkt am Ende",
-  "subheadline": "ein natürlicher Satz: was das Tool macht + für wen",
+  "headline": "maximal 9 WÃ¶rter, konkreter Nutzen, kein Punkt am Ende",
+  "subheadline": "ein natÃ¼rlicher Satz: was das Tool macht + fÃ¼r wen",
   "bullets": [
     "konkreter Bulletpoint mit Produktbezug",
     "konkreter Bulletpoint mit Produktbezug",
@@ -1450,16 +1479,16 @@ JSON-SCHEMA:
   ],
   "cta": "kurze neutrale CTA, z.B. Zur Warteliste.",
   "faq": [
-    { "q": "Was ist GLE Prompt Studio?", "a": "Antwort als vollständiger Satz." },
-    { "q": "Für wen ist GLE Prompt Studio gedacht?", "a": "Antwort als vollständiger Satz." },
-    { "q": "Was kostet GLE Prompt Studio später?", "a": "Antwort als vollständiger Satz." }
+    { "q": "Was ist GLE Prompt Studio?", "a": "Antwort als vollstÃ¤ndiger Satz." },
+    { "q": "FÃ¼r wen ist GLE Prompt Studio gedacht?", "a": "Antwort als vollstÃ¤ndiger Satz." },
+    { "q": "Was kostet GLE Prompt Studio spÃ¤ter?", "a": "Antwort als vollstÃ¤ndiger Satz." }
   ]
 }
 
-QUALITÄTSZIEL:
+QUALITÃ„TSZIEL:
 Der Output soll wie eine echte SaaS-Landingpage klingen, nicht wie ein generischer KI-Text.
 
-Gib nur gültiges JSON aus.
+Gib nur gÃ¼ltiges JSON aus.
 `.trim();
 }
 
@@ -2064,6 +2093,11 @@ app.post("/api/generate", async (req, res) => {
     const isLinkedInPost =
       useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
 
+    const isEmailPost =
+      useCaseNorm === "e-mail" ||
+      useCaseNorm === "email" ||
+      useCaseNorm.includes("e-mail") ||
+      useCaseNorm.includes("email");
     const isProductDescription =
       useCaseNorm.includes("produkt") ||
       useCaseNorm.includes("product") ||
@@ -2094,21 +2128,21 @@ app.post("/api/generate", async (req, res) => {
       temperature: isLandingPage ? 0.35 : 0.6,
     });
 
-    // Landingpage/SaaS: JSON vom Modell → Backend rendert festes Format
+    // Landingpage/SaaS: JSON vom Modell â†’ Backend rendert festes Format
     if (isLandingPage) {
       let parsed = extractJsonObject(output);
 
-      // Wenn das Modell kein gültiges JSON liefert: einmal hart als JSON reparieren
+      // Wenn das Modell kein gÃ¼ltiges JSON liefert: einmal hart als JSON reparieren
       if (!parsed) {
         const jsonRepairPrompt = `
-Du hast ungültigen Output geliefert.
-Wandle den folgenden Inhalt in gültiges JSON um.
-Gib ausschließlich JSON aus. Kein Markdown. Keine Erklärung.
+Du hast ungÃ¼ltigen Output geliefert.
+Wandle den folgenden Inhalt in gÃ¼ltiges JSON um.
+Gib ausschlieÃŸlich JSON aus. Kein Markdown. Keine ErklÃ¤rung.
 
 JSON-SCHEMA:
 {
-  "headline": "maximal 9 Wörter",
-  "subheadline": "ein natürlicher Satz",
+  "headline": "maximal 9 WÃ¶rter",
+  "subheadline": "ein natÃ¼rlicher Satz",
   "bullets": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5"],
   "cta": "Zur Warteliste.",
   "faq": [
@@ -2136,32 +2170,32 @@ ${output}
         output = renderLandingpageOutput(parsed, outLang);
         res.setHeader("x-gle-structured", "landingpage-json");
       } else {
-        // Niemals rohen Modelltext ausgeben, wenn Landingpage-JSON fehlschlägt
+        // Niemals rohen Modelltext ausgeben, wenn Landingpage-JSON fehlschlÃ¤gt
         output = renderLandingpageOutput(
           {
             headline: "Content schneller strukturieren",
             subheadline:
-              "GLE Prompt Studio erstellt strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
+              "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages.",
             bullets: [
               "Weniger Zeitverlust bei der Content-Erstellung.",
-              "Klarere Entwürfe für konkrete Kanäle.",
-              "Konsistentere Textqualität über mehrere Formate hinweg.",
-              "Geeignet für Creator und Solopreneure.",
-              "Early Access verfügbar, PRO folgt später.",
+              "Klarere EntwÃ¼rfe fÃ¼r konkrete KanÃ¤le.",
+              "Konsistentere TextqualitÃ¤t Ã¼ber mehrere Formate hinweg.",
+              "Geeignet fÃ¼r Creator und Solopreneure.",
+              "Early Access verfÃ¼gbar, PRO folgt spÃ¤ter.",
             ],
             cta: "Zur Warteliste.",
             faq: [
               {
                 q: "Was ist GLE Prompt Studio?",
-                a: "Ein Tool für strukturierte Social Posts, Ads und Landingpages.",
+                a: "Ein Tool fÃ¼r strukturierte Social Posts, Ads und Landingpages.",
               },
               {
-                q: "Für wen ist GLE Prompt Studio gedacht?",
-                a: "Für Creator und Solopreneure, die Inhalte klarer vorbereiten möchten.",
+                q: "FÃ¼r wen ist GLE Prompt Studio gedacht?",
+                a: "FÃ¼r Creator und Solopreneure, die Inhalte klarer vorbereiten mÃ¶chten.",
               },
               {
-                q: "Was kostet GLE Prompt Studio später?",
-                a: "Der geplante PRO-Preis liegt später bei 19,99€ pro Monat.",
+                q: "Was kostet GLE Prompt Studio spÃ¤ter?",
+                a: "Der geplante PRO-Preis liegt spÃ¤ter bei 19,99â‚¬ pro Monat.",
               },
             ],
           },
@@ -2189,7 +2223,7 @@ ${output}
 Du bist ein strenger deutscher SaaS-Copy-Editor.
 
 Schreibe den Content KOMPLETT NEU.
-Nicht flicken. Nicht einzelne Wörter ersetzen. Komplett sauber neu ausgeben.
+Nicht flicken. Nicht einzelne WÃ¶rter ersetzen. Komplett sauber neu ausgeben.
 
 Zielsprache: ${outLang}
 Use-Case: ${useCase}
@@ -2200,27 +2234,27 @@ ${topic}
 
 FORMAT MUSS EXAKT SO AUSSEHEN:
 
-1) Headline: [maximal 9 Wörter]
-2) Subheadline: [ein natürlicher Satz]
+1) Headline: [maximal 9 WÃ¶rter]
+2) Subheadline: [ein natÃ¼rlicher Satz]
 3) Bulletpoints:
-- [vollständiger Bulletpoint 1]
-- [vollständiger Bulletpoint 2]
-- [vollständiger Bulletpoint 3]
-- [vollständiger Bulletpoint 4]
-- [vollständiger Bulletpoint 5]
-4) CTA-Zeile: [genau 1 neutrale CTA, kein zusätzlicher CTA danach]
+- [vollstÃ¤ndiger Bulletpoint 1]
+- [vollstÃ¤ndiger Bulletpoint 2]
+- [vollstÃ¤ndiger Bulletpoint 3]
+- [vollstÃ¤ndiger Bulletpoint 4]
+- [vollstÃ¤ndiger Bulletpoint 5]
+4) CTA-Zeile: [genau 1 neutrale CTA, kein zusÃ¤tzlicher CTA danach]
 5) Mini-FAQ:
 - Frage: [Frage 1]
-  Antwort: [Antwort 1 als vollständiger Satz]
+  Antwort: [Antwort 1 als vollstÃ¤ndiger Satz]
 - Frage: [Frage 2]
-  Antwort: [Antwort 2 als vollständiger Satz]
+  Antwort: [Antwort 2 als vollstÃ¤ndiger Satz]
 - Frage: [Frage 3]
-  Antwort: [Antwort 3 als vollständiger Satz]
+  Antwort: [Antwort 3 als vollstÃ¤ndiger Satz]
 
 VERBOTEN:
 - "3)" ohne "Bulletpoints:"
 - "4)" ohne "CTA-Zeile:"
-- ein zusätzlicher CTA nach Punkt 5
+- ein zusÃ¤tzlicher CTA nach Punkt 5
 - "Content erstellen" als Satzfragment
 - "Wer kann ... Content erstellen?"
 - Sie-Form, also "Sie", "Ihr", "Ihre", "Ihren"
@@ -2228,13 +2262,13 @@ VERBOTEN:
 HARTE REGELN:
 - Keine leeren Zeilen nach Nummernpunkten.
 - Kein leerer Punkt wie "3)".
-- Kein zusätzlicher CTA am Ende.
-- Keine kaputten Sätze.
+- Kein zusÃ¤tzlicher CTA am Ende.
+- Keine kaputten SÃ¤tze.
 - Kein "Link in Bio".
 - Kein Meta-Text.
 - Keine Emojis.
 - Keine technischen Begriffe wie GPT, API, Modell, BYOK.
-- Schreibe natürlich, ruhig und verkaufbar.
+- Schreibe natÃ¼rlich, ruhig und verkaufbar.
 
 ZUSATZANFORDERUNGEN:
 ${extra}
@@ -2284,6 +2318,11 @@ Gib nur den finalen reparierten Content aus.
       res.setHeader("x-gle-product", "1");
     }
 
+    // E-Mail: deterministic beta fallback
+    else if (isEmailPost) {
+      output = buildEmailFallback({ outLang, topic });
+      res.setHeader("x-gle-email", "1");
+    }
     // LinkedIn Post: deterministic beta fallback
     else if (isLinkedInPost) {
       output = buildLinkedInFallback({ outLang, topic });
@@ -2310,9 +2349,9 @@ Gib nur den finalen reparierten Content aus.
     } else {
       res.setHeader("x-gle-social", "0");
 
-      // Landingpage/SaaS läuft bereits über JSON -> Renderer.
+      // Landingpage/SaaS lÃ¤uft bereits Ã¼ber JSON -> Renderer.
       // Nicht mehr durch den alten Hot-Stem-Sanitizer jagen,
-      // sonst entstehen kaputte Sätze wie "Was kostet die verwenden?"
+      // sonst entstehen kaputte SÃ¤tze wie "Was kostet die verwenden?"
       if (!isLandingPage) {
         output = normalizeCtaLabel(output, extra);
         output = forceNeutralCTA(output, extra);
@@ -2341,7 +2380,7 @@ Gib nur den finalen reparierten Content aus.
       .replace(/(CTA-Zeile:\s*[^\n]+)(\n+\1)+/gim, "$1")
 
       // remove empty bullet lines
-      .replace(/^\s*[-•]\s*$/gim, "")
+      .replace(/^\s*[-â€¢]\s*$/gim, "")
 
       // normalize spacing
       .replace(/[ \t]{2,}/g, " ")
@@ -2365,9 +2404,9 @@ Gib nur den finalen reparierten Content aus.
       .trim();
 
     // --------------------
-    // FINAL LANDINGPAGE FORMAT FIX — ganz am Ende
+    // FINAL LANDINGPAGE FORMAT FIX â€” ganz am Ende
     // --------------------
-    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription) {
+    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription && !isEmailPost) {
       const looksLikeNumberedLanding =
         /^\s*1\)/m.test(output) &&
         /^\s*2\)/m.test(output) &&
@@ -2378,10 +2417,10 @@ Gib nur den finalen reparierten Content aus.
 
         output = String(output || "")
           // 3) Inline-Bullets sauber in echte Bullet-Liste umwandeln
-          .replace(/^\s*3\)\s*((?:[-•]\s*.+)+)$/gim, (match, rest) => {
+          .replace(/^\s*3\)\s*((?:[-â€¢]\s*.+)+)$/gim, (match, rest) => {
             const items = String(rest || "")
-              .replace(/^\s*[-•]\s*/, "")
-              .split(/\s+[-•]\s*/)
+              .replace(/^\s*[-â€¢]\s*/, "")
+              .split(/\s+[-â€¢]\s*/)
               .map((x) => x.trim())
               .filter(Boolean);
 
@@ -2405,19 +2444,19 @@ Gib nur den finalen reparierten Content aus.
           // kaputte Fragmente entfernen
           .replace(
             /\bWer kann es Inhalte erstellen\?/gi,
-            "Für wen ist GLE Prompt Studio gedacht?",
+            "FÃ¼r wen ist GLE Prompt Studio gedacht?",
           )
           .replace(
             /\bWer kann es Content erstellen\?/gi,
-            "Für wen ist GLE Prompt Studio gedacht?",
+            "FÃ¼r wen ist GLE Prompt Studio gedacht?",
           )
           .replace(
             /\bWer kann .* Inhalte erstellen\?/gi,
-            "Für wen ist GLE Prompt Studio gedacht?",
+            "FÃ¼r wen ist GLE Prompt Studio gedacht?",
           )
           .replace(
             /\bWer kann .* Content erstellen\?/gi,
-            "Für wen ist GLE Prompt Studio gedacht?",
+            "FÃ¼r wen ist GLE Prompt Studio gedacht?",
           )
           .replace(
             /\bGLE Prompt Studio Inhalte erstellen\b/gi,
@@ -2437,7 +2476,7 @@ Gib nur den finalen reparierten Content aus.
           .replace(/\bIhr\b/g, "dein")
           .replace(/\bSie\b/g, "du")
 
-          // letzte Glättung
+          // letzte GlÃ¤ttung
           .replace(/[ \t]{2,}/g, " ")
           .replace(/\s+([,.;:!?])/g, "$1")
           .replace(/\n{3,}/g, "\n\n")
@@ -2481,5 +2520,5 @@ app.get("/", (req, res) =>
 
 // Server start (top-level)
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ GLE Engine Online | Port: ${PORT}`);
+  console.log(`âœ… GLE Engine Online | Port: ${PORT}`);
 });
