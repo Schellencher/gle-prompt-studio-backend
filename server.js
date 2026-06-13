@@ -1028,6 +1028,35 @@ function socialLooksWeak(output) {
 
   return /Windeseile|Hohe QualitÃ¤t|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
 }
+function buildShortVideoFallback({ outLang, topic }) {
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (isEn) {
+    return [
+      "1) Hook: Still starting your content from a blank page?",
+      "2) Scene / flow: Show a creator switching between notes, ads and landing page ideas, then opening GLE Prompt Studio.",
+      "3) Voiceover: Creating content takes time when every format starts from zero. GLE Prompt Studio helps creators and solopreneurs prepare social posts, ads and landing pages faster with clearer structures.",
+      "4) Text overlays:",
+      "- Less time wasted",
+      "- Clearer content formats",
+      "- More consistent output quality",
+      "- Early Access is open",
+      "5) CTA: Join the waitlist.",
+    ].join("\n");
+  }
+
+  return [
+    "1) Hook: Startest du Content immer noch bei null?",
+    "2) Szene / Ablauf: Zeige einen Creator, der zwischen Notizen, Ads und Landingpage-Ideen wechselt und dann GLE Prompt Studio öffnet.",
+    "3) Sprechertext: Content-Erstellung kostet Zeit, wenn jedes Format bei null beginnt. GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages schneller mit klarer Struktur vorzubereiten.",
+    "4) Texteinblendungen:",
+    "- Weniger Zeitverlust",
+    "- Klarere Content-Formate",
+    "- Konsistentere Qualität",
+    "- Early Access ist geöffnet",
+    "5) CTA: Zur Warteliste.",
+  ].join("\n");
+}
 function buildBlogFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2124,6 +2153,11 @@ app.post("/api/generate", async (req, res) => {
     const isLinkedInPost =
       useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
 
+    const isShortVideoScript =
+      useCaseNorm.includes("kurzvideo") ||
+      useCaseNorm.includes("video") ||
+      useCaseNorm.includes("skript") ||
+      useCaseNorm.includes("script");
     const isBlogArticle =
       useCaseNorm.includes("blog") ||
       useCaseNorm.includes("artikel") ||
@@ -2363,6 +2397,11 @@ Gib nur den finalen reparierten Content aus.
       output = buildBlogFallback({ outLang, topic });
       res.setHeader("x-gle-blog", "1");
     }
+    // Kurzvideo-Skript: deterministic beta fallback
+    else if (isShortVideoScript) {
+      output = buildShortVideoFallback({ outLang, topic });
+      res.setHeader("x-gle-video", "1");
+    }
     // LinkedIn Post: deterministic beta fallback
     else if (isLinkedInPost) {
       output = buildLinkedInFallback({ outLang, topic });
@@ -2446,7 +2485,7 @@ Gib nur den finalen reparierten Content aus.
     // --------------------
     // FINAL LANDINGPAGE FORMAT FIX â€” ganz am Ende
     // --------------------
-    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription && !isEmailPost && !isBlogArticle) {
+    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription && !isEmailPost && !isBlogArticle && !isShortVideoScript) {
       const looksLikeNumberedLanding =
         /^\s*1\)/m.test(output) &&
         /^\s*2\)/m.test(output) &&
