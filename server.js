@@ -1253,6 +1253,195 @@ function socialLooksWeak(output) {
 
   return /Windeseile|Hohe QualitÃ¤t|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
 }
+
+function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}) {
+  const key = getToneKey(tone);
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (key === "default") return output;
+  if (isEn) return output;
+
+  if (kind === "email") {
+    if (key === "locker") {
+      return [
+        "1) Betreff: Content vorbereiten ohne Kopfchaos",
+        "2) Einstiegssatz: Die Warteliste für GLE Prompt Studio ist geöffnet.",
+        "3) Kurzer Haupttext: GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages entspannter vorzubereiten. Aus groben Ideen werden schneller klare Entwürfe.",
+        "4) Vorteile:",
+        "- Weniger Grübeln vor dem leeren Blatt.",
+        "- Klarere Formate für wiederkehrende Inhalte.",
+        "- Mehr Ruhe und Struktur bei der Content-Erstellung.",
+        "5) CTA: Zur Warteliste.",
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+      ].join("\n");
+    }
+
+    if (key === "direkt") {
+      return [
+        "1) Betreff: Spare Zeit bei Social Posts, Ads und Landingpages",
+        "2) Einstiegssatz: GLE Prompt Studio ist jetzt im Early Access.",
+        "3) Kurzer Haupttext: GLE Prompt Studio gibt Creatorn und Solopreneuren eine klare Struktur für Content-Entwürfe. So entstehen Posts, Ads und Landingpages schneller und wiederholbarer.",
+        "4) Vorteile:",
+        "- Bereite Inhalte schneller vor.",
+        "- Nutze klare Strukturen statt leerer Seiten.",
+        "- Halte Qualität über mehrere Ausgaben hinweg stabil.",
+        "5) CTA: Zur Warteliste.",
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+      ].join("\n");
+    }
+
+    if (key === "motiv") {
+      return [
+        "1) Betreff: Mehr Klarheit für deinen nächsten Content",
+        "2) Einstiegssatz: Die Warteliste für GLE Prompt Studio ist geöffnet.",
+        "3) Kurzer Haupttext: GLE Prompt Studio hilft dir, schneller von der Idee zum strukturierten Entwurf zu kommen. So wird Content-Erstellung leichter, klarer und wiederholbarer.",
+        "4) Vorteile:",
+        "- Starte mit mehr Sicherheit in neue Inhalte.",
+        "- Reduziere Druck bei wiederkehrenden Formaten.",
+        "- Baue konsistentere Content-Workflows auf.",
+        "5) CTA: Zur Warteliste.",
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+      ].join("\n");
+    }
+
+    if (key === "verkauf") {
+      return [
+        "1) Betreff: Bereite Content vor, der klarer verkauft",
+        "2) Einstiegssatz: GLE Prompt Studio ist jetzt im Early Access.",
+        "3) Kurzer Haupttext: GLE Prompt Studio hilft Creatorn und Solopreneuren, Posts, Ads und Landingpages mit klarerer Botschaft vorzubereiten. So werden Nutzen, Zielgruppe und CTA schneller greifbar.",
+        "4) Vorteile:",
+        "- Klarere Botschaften für Verkaufsformate.",
+        "- Schnellere Vorbereitung von Ads und Landingpages.",
+        "- Wiederholbare Struktur für bessere Content-Qualität.",
+        "5) CTA: Zur Warteliste.",
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+      ].join("\n");
+    }
+  }
+
+  if (kind === "blog") {
+    if (key === "locker") {
+      return [
+        "1) Titel: Content vorbereiten, ohne jedes Mal bei null zu starten",
+        "2) Einleitung: Viele Creator verlieren Zeit, weil jeder neue Inhalt wieder bei einem leeren Blatt beginnt.",
+        "3) Gliederung:",
+        "- Warum Content oft chaotisch startet",
+        "- Wie klare Formate den Prozess entspannen",
+        "- Wie GLE Prompt Studio aus Ideen schneller Entwürfe macht",
+        "4) Hauptteil:",
+        "GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages entspannter vorzubereiten. Statt jedes Format neu zu zerdenken, entsteht ein klarer Ausgangspunkt. Das spart Zeit und macht wiederkehrende Inhalte leichter planbar.",
+        "5) Fazit: Content wird einfacher, wenn der Startpunkt klar ist.",
+        "6) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "direkt") {
+      return [
+        "1) Titel: So bereitest du Content schneller vor",
+        "2) Einleitung: Content-Erstellung kostet Zeit, wenn Struktur fehlt.",
+        "3) Gliederung:",
+        "- Wo Creator Zeit verlieren",
+        "- Warum wiederholbare Formate helfen",
+        "- Wie GLE Prompt Studio die Vorbereitung beschleunigt",
+        "4) Hauptteil:",
+        "GLE Prompt Studio gibt Creatorn und Solopreneuren eine klare Struktur für Social Posts, Ads und Landingpages. Dadurch entstehen Entwürfe schneller, Inhalte bleiben nachvollziehbarer und wiederkehrende Formate lassen sich effizienter vorbereiten.",
+        "5) Fazit: Wer schneller klare Entwürfe hat, kann schneller veröffentlichen.",
+        "6) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "motiv") {
+      return [
+        "1) Titel: Mehr Klarheit für deine Content-Erstellung",
+        "2) Einleitung: Gute Inhalte entstehen leichter, wenn der erste Schritt klar ist.",
+        "3) Gliederung:",
+        "- Warum Klarheit den Content-Prozess erleichtert",
+        "- Wie wiederholbare Strukturen Sicherheit geben",
+        "- Wie GLE Prompt Studio Ideen in Entwürfe verwandelt",
+        "4) Hauptteil:",
+        "GLE Prompt Studio unterstützt Creator und Solopreneure dabei, Ideen schneller in strukturierte Inhalte zu verwandeln. Social Posts, Ads und Landingpages bekommen einen klareren Startpunkt. Das reduziert Druck und hilft, konsistenter zu veröffentlichen.",
+        "5) Fazit: Mit klarer Struktur fühlt sich Content-Erstellung leichter an.",
+        "6) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "verkauf") {
+      return [
+        "1) Titel: Wie klare Content-Strukturen bessere Marketing-Texte ermöglichen",
+        "2) Einleitung: Wer verkaufen will, braucht zuerst eine klare Botschaft.",
+        "3) Gliederung:",
+        "- Warum unklare Inhalte weniger überzeugen",
+        "- Wie Struktur Verkaufsbotschaften schärft",
+        "- Wie GLE Prompt Studio Posts, Ads und Landingpages vorbereitet",
+        "4) Hauptteil:",
+        "GLE Prompt Studio hilft Creatorn und Solopreneuren, Verkaufsinhalte schneller vorzubereiten. Statt jedes Mal neu über Hook, Nutzen und CTA nachzudenken, entstehen strukturierte Entwürfe für Posts, Ads und Landingpages.",
+        "5) Fazit: Klarere Vorbereitung führt zu klareren Botschaften.",
+        "6) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+  }
+
+  if (kind === "video") {
+    if (key === "locker") {
+      return [
+        "1) Hook: Kennst du dieses Content-Chaos?",
+        "2) Szene / Ablauf: Zeige einen Creator mit vielen offenen Notizen, dann den Wechsel zu GLE Prompt Studio.",
+        "3) Sprechertext: Content muss nicht jedes Mal kompliziert starten. GLE Prompt Studio hilft Creatorn und Solopreneuren, Posts, Ads und Landingpages entspannter vorzubereiten.",
+        "4) Texteinblendungen:",
+        "- Weniger Kopfchaos",
+        "- Klarere Entwürfe",
+        "- Wiederholbare Formate",
+        "- Schneller vom Gedanken zum Inhalt",
+        "5) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "direkt") {
+      return [
+        "1) Hook: Starte Content nicht mehr bei null.",
+        "2) Szene / Ablauf: Zeige eine leere Seite, dann strukturierte Entwürfe in GLE Prompt Studio.",
+        "3) Sprechertext: GLE Prompt Studio gibt Creatorn und Solopreneuren klare Strukturen für Social Posts, Ads und Landingpages. So wird aus einer Idee schneller ein nutzbarer Entwurf.",
+        "4) Texteinblendungen:",
+        "- Schnellere Vorbereitung",
+        "- Klarere Struktur",
+        "- Weniger Zeitverlust",
+        "- Wiederholbare Content-Formate",
+        "5) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "motiv") {
+      return [
+        "1) Hook: Deine nächste Content-Idee verdient einen klaren Start.",
+        "2) Szene / Ablauf: Zeige einen Creator, der aus einer groben Idee Schritt für Schritt einen klaren Entwurf erstellt.",
+        "3) Sprechertext: Mit GLE Prompt Studio wird Content-Erstellung leichter. Creator und Solopreneure bekommen schneller Struktur, Klarheit und wiederholbare Formate.",
+        "4) Texteinblendungen:",
+        "- Mehr Klarheit",
+        "- Mehr Sicherheit",
+        "- Schnellere Entwürfe",
+        "- Konsistentere Inhalte",
+        "5) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "verkauf") {
+      return [
+        "1) Hook: Deine Inhalte brauchen eine klare Botschaft.",
+        "2) Szene / Ablauf: Zeige Posts, Ads und Landingpages, die mit GLE Prompt Studio strukturiert vorbereitet werden.",
+        "3) Sprechertext: GLE Prompt Studio hilft Creatorn und Solopreneuren, Verkaufsinhalte schneller vorzubereiten. Nutzen, Zielgruppe und CTA werden klarer zusammengeführt.",
+        "4) Texteinblendungen:",
+        "- Klarere Botschaften",
+        "- Schnellere Ads",
+        "- Strukturierte Landingpages",
+        "- Bessere Content-Vorbereitung",
+        "5) CTA: Zur Warteliste."
+      ].join("\n");
+    }
+  }
+
+  return output;
+}
+
 function buildShortVideoFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2615,16 +2804,19 @@ Gib nur den finalen reparierten Content aus.
     // E-Mail: deterministic beta fallback
     else if (isEmailPost) {
       output = buildEmailFallback({ outLang, topic });
+      output = applyExtendedToneFallback(output, { kind: "email", tone, outLang });
       res.setHeader("x-gle-email", "1");
     }
     // Blogartikel: deterministic beta fallback
     else if (isBlogArticle) {
       output = buildBlogFallback({ outLang, topic });
+      output = applyExtendedToneFallback(output, { kind: "blog", tone, outLang });
       res.setHeader("x-gle-blog", "1");
     }
     // Kurzvideo-Skript: deterministic beta fallback
     else if (isShortVideoScript) {
       output = buildShortVideoFallback({ outLang, topic });
+      output = applyExtendedToneFallback(output, { kind: "video", tone, outLang });
       res.setHeader("x-gle-video", "1");
     }
     // LinkedIn Post: deterministic beta fallback
