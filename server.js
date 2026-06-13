@@ -674,9 +674,16 @@ async function openaiResponses({ apiKey, model, input, temperature }) {
     body: JSON.stringify({
       model,
       input,
-      temperature: typeof temperature === "number" ? temperature : undefined,
+      temperature: safeTemperature(model, temperature, undefined),
     }),
   });
+
+  function safeTemperature(model, temperature, fallback) {
+    const m = String(model || "").toLowerCase();
+    if (m.startsWith("gpt-5")) return undefined;
+    if (typeof temperature === "number") return temperature;
+    return fallback;
+  }
 
   const text = await res.text().catch(() => "");
   let data = {};
@@ -729,7 +736,7 @@ async function openaiChatCompletions({ apiKey, model, prompt, temperature }) {
         },
         { role: "user", content: String(prompt || "") },
       ],
-      temperature: typeof temperature === "number" ? temperature : 0.6,
+      temperature: safeTemperature(model, temperature, 0.6),
     }),
   });
 
@@ -948,8 +955,6 @@ function stripMarkdownArtifacts(s = "") {
   return out;
 }
 
-
-
 function repairEncodingArtifacts(value) {
   if (!value || typeof value !== "string") return value;
 
@@ -983,10 +988,22 @@ function sanitizeLandingPageOutput(output, { outLang = "DE" } = {}) {
     .replace(/Sofortige Zugriff/g, "Sofortiger Zugriff")
     .replace(/klar Inhalte/g, "klare Inhalte")
     .replace(/durchgehend klar Texte/g, "durchgehend klare Texte")
-    .replace(/Tool für Erstellung von Content/g, "Tool für die Erstellung von Content")
-    .replace(/Reduziert Zeitverlust bei der Content-Erstellung erheblich\./g, "Reduziere den Zeitverlust bei der Content-Erstellung erheblich.")
-    .replace(/Eine benutzerfreundliche Oberfläche einfache Handhabung\./g, "Eine benutzerfreundliche Oberfläche erleichtert die Handhabung.")
-    .replace(/GLE Prompt Studio für Creator und Solopreneure\./g, "GLE Prompt Studio unterstützt Creator und Solopreneure bei der Content-Erstellung.");
+    .replace(
+      /Tool für Erstellung von Content/g,
+      "Tool für die Erstellung von Content",
+    )
+    .replace(
+      /Reduziert Zeitverlust bei der Content-Erstellung erheblich\./g,
+      "Reduziere den Zeitverlust bei der Content-Erstellung erheblich.",
+    )
+    .replace(
+      /Eine benutzerfreundliche Oberfläche einfache Handhabung\./g,
+      "Eine benutzerfreundliche Oberfläche erleichtert die Handhabung.",
+    )
+    .replace(
+      /GLE Prompt Studio für Creator und Solopreneure\./g,
+      "GLE Prompt Studio unterstützt Creator und Solopreneure bei der Content-Erstellung.",
+    );
 
   const bannedBulletPattern = isEn
     ? /(waitlist|early access|sign up|join now|cta|price|19\.99|19,99|\$|eur|euro)/i
@@ -998,14 +1015,14 @@ function sanitizeLandingPageOutput(output, { outLang = "DE" } = {}) {
         "Create structured drafts for social posts, ads and landing pages.",
         "Keep content quality consistent across multiple outputs.",
         "Use repeatable formats instead of starting from scratch every time.",
-        "Turn rough ideas into clear content structures faster."
+        "Turn rough ideas into clear content structures faster.",
       ]
     : [
         "Spare Zeit bei der Vorbereitung wiederkehrender Inhalte.",
         "Erstelle strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
         "Halte die Content-Qualität über mehrere Ausgaben hinweg konsistent.",
         "Nutze wiederholbare Formate statt jedes Mal bei null zu starten.",
-        "Verwandle grobe Ideen schneller in klare Content-Strukturen."
+        "Verwandle grobe Ideen schneller in klare Content-Strukturen.",
       ];
 
   let safeIndex = 0;
@@ -1091,7 +1108,10 @@ function getToneKey(tone = "") {
   return "default";
 }
 
-function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}) {
+function applyToneFallback(
+  output,
+  { kind = "", tone = "", outLang = "DE" } = {},
+) {
   const key = getToneKey(tone);
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -1109,7 +1129,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Wiederkehrende Formate lassen sich leichter vorbereiten.",
         "- Content fühlt sich weniger chaotisch an.",
         "4) Wenn der Startpunkt klar ist, wird die Umsetzung leichter.",
-        "5) Zur Warteliste."
+        "5) Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1122,7 +1142,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Klarere Vorgaben für wiederholbare Formate.",
         "- Mehr Konsistenz über mehrere Inhalte hinweg.",
         "4) Klare Struktur spart Zeit und macht Umsetzung einfacher.",
-        "5) Zur Warteliste."
+        "5) Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1135,7 +1155,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Wiederholbare Formate geben dir Sicherheit.",
         "- Deine Content-Qualität bleibt besser nachvollziehbar.",
         "4) Gute Inhalte entstehen leichter, wenn der Anfang klar ist.",
-        "5) Zur Warteliste."
+        "5) Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1148,7 +1168,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Klarere Botschaften für wiederholbare Formate.",
         "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
         "4) Wer schneller klare Inhalte vorbereitet, kann schneller veröffentlichen.",
-        "5) Zur Warteliste."
+        "5) Zur Warteliste.",
       ].join("\n");
     }
   }
@@ -1163,7 +1183,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Bereite Posts, Ads und Landingpages entspannter vor.",
         "- Halte wiederkehrende Formate leichter im Griff.",
         "- Spare Zeit, ohne jeden Text neu zu zerdenken.",
-        "Zur Warteliste."
+        "Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1174,7 +1194,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Erstelle klarere Anzeigen-Entwürfe.",
         "- Strukturiere Landingpage-Ideen gezielter.",
         "- Halte deine Content-Qualität über Formate hinweg stabil.",
-        "Zur Warteliste."
+        "Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1185,7 +1205,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Reduziere den Druck bei der Content-Erstellung.",
         "- Nutze wiederholbare Formate für mehr Sicherheit.",
         "- Bleib bei Posts, Ads und Landingpages konsistenter.",
-        "Zur Warteliste."
+        "Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1196,7 +1216,7 @@ function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}
         "- Bereite Landingpages mit besserer Struktur vor.",
         "- Spare Zeit bei wiederkehrenden Verkaufsformaten.",
         "- Halte Nutzen, Zielgruppe und CTA sauber zusammen.",
-        "Zur Warteliste."
+        "Zur Warteliste.",
       ].join("\n");
     }
   }
@@ -1251,10 +1271,15 @@ function validateSocialPost(output) {
 function socialLooksWeak(output) {
   const s = String(output || "");
 
-  return /Windeseile|Hohe QualitÃ¤t|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
+  return /Windeseile|Hohe QualitÃ¤t|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(
+    s,
+  );
 }
 
-function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}) {
+function applyExtendedToneFallback(
+  output,
+  { kind = "", tone = "", outLang = "DE" } = {},
+) {
   const key = getToneKey(tone);
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -1272,7 +1297,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Klarere Formate für wiederkehrende Inhalte.",
         "- Mehr Ruhe und Struktur bei der Content-Erstellung.",
         "5) CTA: Zur Warteliste.",
-        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
       ].join("\n");
     }
 
@@ -1286,7 +1311,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Nutze klare Strukturen statt leerer Seiten.",
         "- Halte Qualität über mehrere Ausgaben hinweg stabil.",
         "5) CTA: Zur Warteliste.",
-        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
       ].join("\n");
     }
 
@@ -1300,7 +1325,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Reduziere Druck bei wiederkehrenden Formaten.",
         "- Baue konsistentere Content-Workflows auf.",
         "5) CTA: Zur Warteliste.",
-        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
       ].join("\n");
     }
 
@@ -1314,7 +1339,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Schnellere Vorbereitung von Ads und Landingpages.",
         "- Wiederholbare Struktur für bessere Content-Qualität.",
         "5) CTA: Zur Warteliste.",
-        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat."
+        "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
       ].join("\n");
     }
   }
@@ -1331,7 +1356,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "4) Hauptteil:",
         "GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages entspannter vorzubereiten. Statt jedes Format neu zu zerdenken, entsteht ein klarer Ausgangspunkt. Das spart Zeit und macht wiederkehrende Inhalte leichter planbar.",
         "5) Fazit: Content wird einfacher, wenn der Startpunkt klar ist.",
-        "6) CTA: Zur Warteliste."
+        "6) CTA: Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1346,7 +1371,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "4) Hauptteil:",
         "GLE Prompt Studio gibt Creatorn und Solopreneuren eine klare Struktur für Social Posts, Ads und Landingpages. Dadurch entstehen Entwürfe schneller, Inhalte bleiben nachvollziehbarer und wiederkehrende Formate lassen sich effizienter vorbereiten.",
         "5) Fazit: Wer schneller klare Entwürfe hat, kann schneller veröffentlichen.",
-        "6) CTA: Zur Warteliste."
+        "6) CTA: Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1361,7 +1386,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "4) Hauptteil:",
         "GLE Prompt Studio unterstützt Creator und Solopreneure dabei, Ideen schneller in strukturierte Inhalte zu verwandeln. Social Posts, Ads und Landingpages bekommen einen klareren Startpunkt. Das reduziert Druck und hilft, konsistenter zu veröffentlichen.",
         "5) Fazit: Mit klarer Struktur fühlt sich Content-Erstellung leichter an.",
-        "6) CTA: Zur Warteliste."
+        "6) CTA: Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1376,7 +1401,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "4) Hauptteil:",
         "GLE Prompt Studio hilft Creatorn und Solopreneuren, Verkaufsinhalte schneller vorzubereiten. Statt jedes Mal neu über Hook, Nutzen und CTA nachzudenken, entstehen strukturierte Entwürfe für Posts, Ads und Landingpages.",
         "5) Fazit: Klarere Vorbereitung führt zu klareren Botschaften.",
-        "6) CTA: Zur Warteliste."
+        "6) CTA: Zur Warteliste.",
       ].join("\n");
     }
   }
@@ -1392,7 +1417,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Klarere Entwürfe",
         "- Wiederholbare Formate",
         "- Schneller vom Gedanken zum Inhalt",
-        "5) CTA: Zur Warteliste."
+        "5) CTA: Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1406,7 +1431,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Klarere Struktur",
         "- Weniger Zeitverlust",
         "- Wiederholbare Content-Formate",
-        "5) CTA: Zur Warteliste."
+        "5) CTA: Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1420,7 +1445,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Mehr Sicherheit",
         "- Schnellere Entwürfe",
         "- Konsistentere Inhalte",
-        "5) CTA: Zur Warteliste."
+        "5) CTA: Zur Warteliste.",
       ].join("\n");
     }
 
@@ -1434,7 +1459,7 @@ function applyExtendedToneFallback(output, { kind = "", tone = "", outLang = "DE
         "- Schnellere Ads",
         "- Strukturierte Landingpages",
         "- Bessere Content-Vorbereitung",
-        "5) CTA: Zur Warteliste."
+        "5) CTA: Zur Warteliste.",
       ].join("\n");
     }
   }
@@ -2584,8 +2609,12 @@ app.post("/api/generate", async (req, res) => {
     const isProductDescription =
       useCaseNorm.includes("produkt") ||
       useCaseNorm.includes("product") ||
-      String(extra || "").toLowerCase().includes("produktbeschreibung") ||
-      String(extra || "").toLowerCase().includes("product description");
+      String(extra || "")
+        .toLowerCase()
+        .includes("produktbeschreibung") ||
+      String(extra || "")
+        .toLowerCase()
+        .includes("product description");
 
     const masterPrompt = isLandingPage
       ? buildLandingpageJsonPrompt({
@@ -2804,19 +2833,31 @@ Gib nur den finalen reparierten Content aus.
     // E-Mail: deterministic beta fallback
     else if (isEmailPost) {
       output = buildEmailFallback({ outLang, topic });
-      output = applyExtendedToneFallback(output, { kind: "email", tone, outLang });
+      output = applyExtendedToneFallback(output, {
+        kind: "email",
+        tone,
+        outLang,
+      });
       res.setHeader("x-gle-email", "1");
     }
     // Blogartikel: deterministic beta fallback
     else if (isBlogArticle) {
       output = buildBlogFallback({ outLang, topic });
-      output = applyExtendedToneFallback(output, { kind: "blog", tone, outLang });
+      output = applyExtendedToneFallback(output, {
+        kind: "blog",
+        tone,
+        outLang,
+      });
       res.setHeader("x-gle-blog", "1");
     }
     // Kurzvideo-Skript: deterministic beta fallback
     else if (isShortVideoScript) {
       output = buildShortVideoFallback({ outLang, topic });
-      output = applyExtendedToneFallback(output, { kind: "video", tone, outLang });
+      output = applyExtendedToneFallback(output, {
+        kind: "video",
+        tone,
+        outLang,
+      });
       res.setHeader("x-gle-video", "1");
     }
     // LinkedIn Post: deterministic beta fallback
@@ -2904,7 +2945,15 @@ Gib nur den finalen reparierten Content aus.
     // --------------------
     // FINAL LANDINGPAGE FORMAT FIX â€” ganz am Ende
     // --------------------
-    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription && !isEmailPost && !isBlogArticle && !isShortVideoScript) {
+    if (
+      !isSocial &&
+      !isLandingPage &&
+      !isLinkedInPost &&
+      !isProductDescription &&
+      !isEmailPost &&
+      !isBlogArticle &&
+      !isShortVideoScript
+    ) {
       const looksLikeNumberedLanding =
         /^\s*1\)/m.test(output) &&
         /^\s*2\)/m.test(output) &&
@@ -2987,15 +3036,13 @@ Gib nur den finalen reparierten Content aus.
     }
 
     markUsage(acc, wantsBoost);
-      if (isLandingPage) {
-        output = sanitizeLandingPageOutput(output, { outLang });
-        res.setHeader("x-gle-landing-sanitized", "1");
-      }
+    if (isLandingPage) {
+      output = sanitizeLandingPageOutput(output, { outLang });
+      res.setHeader("x-gle-landing-sanitized", "1");
+    }
 
-
-    
-      output = repairEncodingArtifacts(output);
-return res.json({
+    output = repairEncodingArtifacts(output);
+    return res.json({
       ok: true,
       output,
       mode,
