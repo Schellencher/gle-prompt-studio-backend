@@ -948,6 +948,84 @@ function stripMarkdownArtifacts(s = "") {
   return out;
 }
 
+
+function sanitizeLandingPageOutput(output, { outLang = "DE" } = {}) {
+  if (!output || typeof output !== "string") return output;
+
+  const isEn = String(outLang).toLowerCase().startsWith("en");
+
+  output = output
+    .replace(/EntwÃ¼rfe/g, "Entwürfe")
+    .replace(/fÃ¼r/g, "für")
+    .replace(/unnÃ¶tige/g, "unnötige")
+    .replace(/QualitÃ¤t/g, "Qualität")
+    .replace(/spÃ¤ter/g, "später")
+    .replace(/ermöglicht Strukturierte/g, "ermöglicht strukturierte")
+    .replace(/Sofortige Zugriff/g, "Sofortiger Zugriff")
+    .replace(/klar Inhalte/g, "klare Inhalte")
+    .replace(/durchgehend klar Texte/g, "durchgehend klare Texte")
+    .replace(/Tool für Erstellung von Content/g, "Tool für die Erstellung von Content");
+
+  const bannedBulletPattern = isEn
+    ? /(waitlist|early access|sign up|join now|cta|price|19\.99|19,99|\$|eur|euro)/i
+    : /(warteliste|early access|melde dich|anmelden|cta|preis|19\.99|19,99|€|eur|euro)/i;
+
+  const safeBullets = isEn
+    ? [
+        "Save time when preparing recurring content.",
+        "Create structured drafts for social posts, ads and landing pages.",
+        "Keep content quality consistent across multiple outputs.",
+        "Use repeatable formats instead of starting from scratch every time.",
+        "Turn rough ideas into clear content structures faster."
+      ]
+    : [
+        "Spare Zeit bei der Vorbereitung wiederkehrender Inhalte.",
+        "Erstelle strukturierte Entwürfe für Social Posts, Ads und Landingpages.",
+        "Halte die Content-Qualität über mehrere Ausgaben hinweg konsistent.",
+        "Nutze wiederholbare Formate statt jedes Mal bei null zu starten.",
+        "Verwandle grobe Ideen schneller in klare Content-Strukturen."
+      ];
+
+  let safeIndex = 0;
+
+  function nextSafeBullet() {
+    const bullet = safeBullets[safeIndex % safeBullets.length];
+    safeIndex += 1;
+    return bullet;
+  }
+
+  let inBulletSection = false;
+
+  return output
+    .split(/\r?\n/)
+    .map((line) => {
+      if (/^\s*3\)\s*Bulletpoints/i.test(line)) {
+        inBulletSection = true;
+        return line;
+      }
+
+      if (/^\s*4\)/.test(line)) {
+        inBulletSection = false;
+        return line;
+      }
+
+      if (!inBulletSection) return line;
+
+      const match = line.match(/^(\s*)-\s+(.*)$/);
+      if (!match) return line;
+
+      const indent = match[1];
+      const bullet = match[2];
+
+      if (bannedBulletPattern.test(bullet)) {
+        return indent + "- " + nextSafeBullet();
+      }
+
+      return line;
+    })
+    .join("\n");
+}
+
 function buildProductDescriptionFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2568,6 +2646,11 @@ Gib nur den finalen reparierten Content aus.
     }
 
     markUsage(acc, wantsBoost);
+      if (isLandingPage) {
+        output = sanitizeLandingPageOutput(output, { outLang });
+        res.setHeader("x-gle-landing-sanitized", "1");
+      }
+
 
     return res.json({
       ok: true,
