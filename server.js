@@ -949,6 +949,25 @@ function stripMarkdownArtifacts(s = "") {
 }
 
 
+
+function repairEncodingArtifacts(value) {
+  if (!value || typeof value !== "string") return value;
+
+  return value
+    .replace(/\u00C3\u00BC/g, "\u00FC")
+    .replace(/\u00C3\u00A4/g, "\u00E4")
+    .replace(/\u00C3\u00B6/g, "\u00F6")
+    .replace(/\u00C3\u009C/g, "\u00DC")
+    .replace(/\u00C3\u0084/g, "\u00C4")
+    .replace(/\u00C3\u0096/g, "\u00D6")
+    .replace(/\u00C3\u009F/g, "\u00DF")
+    .replace(/\u00E2\u201A\u00AC/g, "\u20AC")
+    .replace(/\u00E2\u20AC\u201C/g, "-")
+    .replace(/\u00E2\u20AC\u201D/g, "-")
+    .replace(/\u00C2\u00B7/g, "-")
+    .replace(/\u00C2/g, "");
+}
+
 function sanitizeLandingPageOutput(output, { outLang = "DE" } = {}) {
   if (!output || typeof output !== "string") return output;
 
@@ -2655,7 +2674,9 @@ Gib nur den finalen reparierten Content aus.
       }
 
 
-    return res.json({
+    
+      output = repairEncodingArtifacts(output);
+return res.json({
       ok: true,
       output,
       mode,
