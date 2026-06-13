@@ -1028,6 +1028,37 @@ function socialLooksWeak(output) {
 
   return /Windeseile|Hohe QualitÃ¤t|ohne stundenlange Arbeit|Trage dich jetzt|trage dich jetzt|sei unter den Ersten|unter den Ersten|Sichere dir|reduziert deinen Aufwand|Anzeigen und Webseiten|Einzelunternehmer|From the outside|Reply with BETA|payment flow|technical base/i.test(s);
 }
+function buildBlogFallback({ outLang, topic }) {
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (isEn) {
+    return [
+      "1) Title: How creators and solopreneurs can prepare content faster",
+      "2) Introduction: Creating content often takes more time than expected. GLE Prompt Studio helps turn ideas into clearer structures faster.",
+      "3) Outline:",
+      "- Why content preparation slows many creators down",
+      "- How clear formats save time",
+      "- How GLE Prompt Studio supports repeatable content workflows",
+      "4) Main section:",
+      "GLE Prompt Studio helps creators and solopreneurs prepare social posts, ads and landing pages with more structure. Instead of starting from a blank page every time, users get a clearer starting point for their content. This can reduce time pressure and make output quality more consistent across different formats.",
+      "5) Conclusion: Good content becomes easier when the starting point is clear.",
+      "6) CTA: Join the waitlist.",
+    ].join("\n");
+  }
+
+  return [
+    "1) Titel: Wie Creator und Solopreneure Content schneller vorbereiten können",
+    "2) Einleitung: Content-Erstellung kostet oft mehr Zeit als geplant. GLE Prompt Studio hilft dabei, Ideen schneller in klare Strukturen zu bringen.",
+    "3) Gliederung:",
+    "- Warum Content-Vorbereitung viele Creator ausbremst",
+    "- Wie klare Formate Zeit sparen",
+    "- Wie GLE Prompt Studio wiederholbare Content-Workflows unterstützt",
+    "4) Hauptteil:",
+    "GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages strukturierter vorzubereiten. Statt jedes Mal mit einem leeren Blatt zu starten, erhalten Nutzer einen klareren Ausgangspunkt für ihre Inhalte. Das kann Zeitdruck reduzieren und die Qualität über mehrere Formate hinweg konsistenter machen.",
+    "5) Fazit: Gute Inhalte entstehen leichter, wenn der Startpunkt klar ist.",
+    "6) CTA: Zur Warteliste.",
+  ].join("\n");
+}
 function buildEmailFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2093,6 +2124,10 @@ app.post("/api/generate", async (req, res) => {
     const isLinkedInPost =
       useCaseNorm.includes("linkedin") && useCaseNorm.includes("post");
 
+    const isBlogArticle =
+      useCaseNorm.includes("blog") ||
+      useCaseNorm.includes("artikel") ||
+      useCaseNorm.includes("article");
     const isEmailPost =
       useCaseNorm === "e-mail" ||
       useCaseNorm === "email" ||
@@ -2323,6 +2358,11 @@ Gib nur den finalen reparierten Content aus.
       output = buildEmailFallback({ outLang, topic });
       res.setHeader("x-gle-email", "1");
     }
+    // Blogartikel: deterministic beta fallback
+    else if (isBlogArticle) {
+      output = buildBlogFallback({ outLang, topic });
+      res.setHeader("x-gle-blog", "1");
+    }
     // LinkedIn Post: deterministic beta fallback
     else if (isLinkedInPost) {
       output = buildLinkedInFallback({ outLang, topic });
@@ -2406,7 +2446,7 @@ Gib nur den finalen reparierten Content aus.
     // --------------------
     // FINAL LANDINGPAGE FORMAT FIX â€” ganz am Ende
     // --------------------
-    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription && !isEmailPost) {
+    if (!isSocial && !isLandingPage && !isLinkedInPost && !isProductDescription && !isEmailPost && !isBlogArticle) {
       const looksLikeNumberedLanding =
         /^\s*1\)/m.test(output) &&
         /^\s*2\)/m.test(output) &&
