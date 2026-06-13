@@ -964,7 +964,10 @@ function sanitizeLandingPageOutput(output, { outLang = "DE" } = {}) {
     .replace(/Sofortige Zugriff/g, "Sofortiger Zugriff")
     .replace(/klar Inhalte/g, "klare Inhalte")
     .replace(/durchgehend klar Texte/g, "durchgehend klare Texte")
-    .replace(/Tool für Erstellung von Content/g, "Tool für die Erstellung von Content");
+    .replace(/Tool für Erstellung von Content/g, "Tool für die Erstellung von Content")
+    .replace(/Reduziert Zeitverlust bei der Content-Erstellung erheblich\./g, "Reduziere den Zeitverlust bei der Content-Erstellung erheblich.")
+    .replace(/Eine benutzerfreundliche Oberfläche einfache Handhabung\./g, "Eine benutzerfreundliche Oberfläche erleichtert die Handhabung.")
+    .replace(/GLE Prompt Studio für Creator und Solopreneure\./g, "GLE Prompt Studio unterstützt Creator und Solopreneure bei der Content-Erstellung.");
 
   const bannedBulletPattern = isEn
     ? /(waitlist|early access|sign up|join now|cta|price|19\.99|19,99|\$|eur|euro)/i
