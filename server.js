@@ -1079,125 +1079,7 @@ function buildProductDescriptionFallback({ outLang, topic }) {
     "5) Zur Warteliste.",
   ].join("\n");
 }
-function buildLinkedInFallback({ outLang = "DE", topic = "", tone = "" } = {}) {
-  const isEn = String(outLang).toLowerCase().startsWith("en");
-  const t = String(tone || "").toLowerCase();
-
-  if (isEn) {
-    if (t.includes("locker")) {
-      return [
-        "1) Content does not need to start from zero every time.",
-        "2) GLE Prompt Studio helps creators and solopreneurs prepare social posts, ads and landing pages faster.",
-        "3)",
-        "- Turn rough ideas into structured drafts.",
-        "- Save time when preparing recurring content.",
-        "- Keep your formats clearer and easier to repeat.",
-        "4) Better content starts with a clearer starting point.",
-        "5) Join the waitlist."
-      ].join("\n");
-    }
-
-    if (t.includes("direkt")) {
-      return [
-        "1) Stop losing time on blank pages.",
-        "2) GLE Prompt Studio gives creators and solopreneurs a faster starting point for social posts, ads and landing pages.",
-        "3)",
-        "- Prepare content with less friction.",
-        "- Use clearer structures for repeated formats.",
-        "- Keep output quality more consistent.",
-        "4) If the structure is clear, execution gets easier.",
-        "5) Join the waitlist."
-      ].join("\n");
-    }
-
-    if (t.includes("motiv")) {
-      return [
-        "1) More clarity means more momentum.",
-        "2) GLE Prompt Studio helps creators and solopreneurs move from idea to structured content faster.",
-        "3)",
-        "- Spend less time fighting the empty page.",
-        "- Build repeatable content workflows.",
-        "- Create with more confidence and consistency.",
-        "4) The right starting point can make content feel lighter.",
-        "5) Join the waitlist."
-      ].join("\n");
-    }
-
-    return [
-      "1) Good content needs structure, not more pressure.",
-      "2) GLE Prompt Studio helps creators and solopreneurs prepare social posts, ads and landing pages faster.",
-      "3)",
-      "- Less time lost during content creation.",
-      "- Clearer structure for repeatable formats.",
-      "- More consistent quality across outputs.",
-      "4) Good content becomes easier when the starting point is clear.",
-      "5) Join the waitlist."
-    ].join("\n");
-  }
-
-  if (t.includes("locker")) {
-    return [
-      "1) Content muss nicht jedes Mal bei null starten.",
-      "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages schneller vorzubereiten.",
-      "3)",
-      "- Aus groben Ideen werden schneller klare Entwürfe.",
-      "- Wiederkehrende Formate lassen sich leichter vorbereiten.",
-      "- Content fühlt sich weniger chaotisch an.",
-      "4) Wenn der Startpunkt klar ist, wird die Umsetzung leichter.",
-      "5) Zur Warteliste."
-    ].join("\n");
-  }
-
-  if (t.includes("direkt")) {
-    return [
-      "1) Hör auf, bei jedem Content-Stück neu anzufangen.",
-      "2) GLE Prompt Studio gibt Creatorn und Solopreneuren schneller eine klare Struktur für Posts, Ads und Landingpages.",
-      "3)",
-      "- Weniger Zeitverlust bei der Vorbereitung.",
-      "- Klarere Vorgaben für wiederholbare Formate.",
-      "- Mehr Konsistenz über mehrere Inhalte hinweg.",
-      "4) Klare Struktur spart Zeit und macht Umsetzung einfacher.",
-      "5) Zur Warteliste."
-    ].join("\n");
-  }
-
-  if (t.includes("motiv")) {
-    return [
-      "1) Mehr Klarheit, weniger Content-Stress.",
-      "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Ideen schneller in klare Inhalte zu verwandeln.",
-      "3)",
-      "- Du startest nicht mehr mit einem leeren Blatt.",
-      "- Wiederholbare Formate geben dir Sicherheit.",
-      "- Deine Content-Qualität bleibt besser nachvollziehbar.",
-      "4) Gute Inhalte entstehen leichter, wenn der Anfang klar ist.",
-      "5) Zur Warteliste."
-    ].join("\n");
-  }
-
-  if (t.includes("verkauf")) {
-    return [
-      "1) Content braucht Struktur, bevor er verkauft.",
-      "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Posts, Ads und Landingpages klarer und schneller vorzubereiten.",
-      "3)",
-      "- Weniger Reibung bei der Content-Erstellung.",
-      "- Klarere Botschaften für wiederholbare Formate.",
-      "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
-      "4) Wer schneller klare Inhalte vorbereitet, kann schneller veröffentlichen.",
-      "5) Zur Warteliste."
-    ].join("\n");
-  }
-
-  return [
-    "1) Content braucht Struktur, nicht mehr Druck.",
-    "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages schneller vorzubereiten.",
-    "3)",
-    "- Weniger Zeitverlust bei der Content-Erstellung.",
-    "- Klarere Struktur für wiederholbare Formate.",
-    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
-    "4) Gute Inhalte entstehen leichter, wenn der Startpunkt klar ist.",
-    "5) Zur Warteliste."
-  ].join("\n");
-}) {
+function buildLinkedInFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
   if (isEn) {
@@ -1335,107 +1217,7 @@ function buildEmailFallback({ outLang, topic }) {
     "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
   ].join("\n");
 }
-function buildSocialFallback({ outLang = "DE", topic = "", tone = "" } = {}) {
-  const isEn = String(outLang).toLowerCase().startsWith("en");
-  const t = String(tone || "").toLowerCase();
-
-  if (isEn) {
-    if (t.includes("locker")) {
-      return [
-        "Make content prep feel lighter.",
-        "- Turn rough ideas into usable drafts faster.",
-        "- Prepare posts, ads and landing pages with less friction.",
-        "- Keep recurring formats easier to repeat.",
-        "- Save time without overthinking every post.",
-        "Join the waitlist."
-      ].join("\n");
-    }
-
-    if (t.includes("direkt")) {
-      return [
-        "Stop starting from scratch.",
-        "- Prepare social posts faster.",
-        "- Create clearer ad drafts.",
-        "- Structure landing page ideas more quickly.",
-        "- Keep content quality consistent across formats.",
-        "Join the waitlist."
-      ].join("\n");
-    }
-
-    if (t.includes("motiv")) {
-      return [
-        "More clarity. More output.",
-        "- Move from idea to draft faster.",
-        "- Reduce the pressure of content creation.",
-        "- Build repeatable content formats.",
-        "- Stay consistent across posts, ads and landing pages.",
-        "Join the waitlist."
-      ].join("\n");
-    }
-
-    return [
-      "Prepare clearer content.",
-      "- Prepare drafts for social posts, ads and landing pages faster.",
-      "- Reduce time lost during content creation.",
-      "- Keep formats clearer and easier to repeat.",
-      "- Maintain more consistent quality across outputs.",
-      "Join the waitlist."
-    ].join("\n");
-  }
-
-  if (t.includes("locker")) {
-    return [
-      "Content muss nicht kompliziert sein.",
-      "- Verwandle grobe Ideen schneller in klare Entwürfe.",
-      "- Bereite Posts, Ads und Landingpages entspannter vor.",
-      "- Halte wiederkehrende Formate leichter im Griff.",
-      "- Spare Zeit, ohne jeden Text neu zu zerdenken.",
-      "Zur Warteliste."
-    ].join("\n");
-  }
-
-  if (t.includes("direkt")) {
-    return [
-      "Starte nicht jedes Mal bei null.",
-      "- Bereite Social Posts schneller vor.",
-      "- Erstelle klarere Anzeigen-Entwürfe.",
-      "- Strukturiere Landingpage-Ideen gezielter.",
-      "- Halte deine Content-Qualität über Formate hinweg stabil.",
-      "Zur Warteliste."
-    ].join("\n");
-  }
-
-  if (t.includes("motiv")) {
-    return [
-      "Mehr Klarheit. Mehr Content.",
-      "- Komm schneller von der Idee zum Entwurf.",
-      "- Reduziere den Druck bei der Content-Erstellung.",
-      "- Nutze wiederholbare Formate für mehr Sicherheit.",
-      "- Bleib bei Posts, Ads und Landingpages konsistenter.",
-      "Zur Warteliste."
-    ].join("\n");
-  }
-
-  if (t.includes("verkauf")) {
-    return [
-      "Mach deine Content-Vorbereitung verkaufsstärker.",
-      "- Formuliere klarere Botschaften für Posts und Ads.",
-      "- Bereite Landingpages mit besserer Struktur vor.",
-      "- Spare Zeit bei wiederkehrenden Verkaufsformaten.",
-      "- Halte Nutzen, Zielgruppe und CTA sauber zusammen.",
-      "Zur Warteliste."
-    ].join("\n");
-  }
-
-  return [
-    "Content klarer vorbereiten.",
-    "- Entwürfe für Social Posts, Ads und Landingpages schneller vorbereiten.",
-    "- Weniger Zeitverlust bei der Content-Erstellung.",
-    "- Formate klarer und wiederholbarer halten.",
-    "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
-    "Zur Warteliste."
-  ].join("\n");
-}) {
+function buildSocialFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
   if (isEn) {
@@ -2722,7 +2504,7 @@ Gib nur den finalen reparierten Content aus.
     }
     // LinkedIn Post: deterministic beta fallback
     else if (isLinkedInPost) {
-      output = buildLinkedInFallback({ outLang, topic, tone });
+      output = buildLinkedInFallback({ outLang, topic });
       res.setHeader("x-gle-linkedin", "1");
     }
 
@@ -2731,7 +2513,7 @@ Gib nur den finalen reparierten Content aus.
       output = stripMarkdownArtifacts(output);
 
       if (!validateSocialPost(output) || socialLooksWeak(output)) {
-        output = buildSocialFallback({ outLang, topic, tone });
+        output = buildSocialFallback({ outLang, topic });
       } else {
         output = output
           .trim()
