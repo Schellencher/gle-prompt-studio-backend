@@ -1079,6 +1079,131 @@ function buildProductDescriptionFallback({ outLang, topic }) {
     "5) Zur Warteliste.",
   ].join("\n");
 }
+
+function getToneKey(tone = "") {
+  const t = String(tone || "").toLowerCase();
+
+  if (t.includes("locker")) return "locker";
+  if (t.includes("direkt")) return "direkt";
+  if (t.includes("motiv")) return "motiv";
+  if (t.includes("verkauf")) return "verkauf";
+
+  return "default";
+}
+
+function applyToneFallback(output, { kind = "", tone = "", outLang = "DE" } = {}) {
+  const key = getToneKey(tone);
+  const isEn = String(outLang || "").toLowerCase() === "en";
+
+  if (key === "default") return output;
+
+  if (kind === "linkedin") {
+    if (isEn) return output;
+
+    if (key === "locker") {
+      return [
+        "1) Content muss nicht jedes Mal bei null starten.",
+        "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Social Posts, Ads und Landingpages entspannter vorzubereiten.",
+        "3)",
+        "- Aus groben Ideen werden schneller klare Entwürfe.",
+        "- Wiederkehrende Formate lassen sich leichter vorbereiten.",
+        "- Content fühlt sich weniger chaotisch an.",
+        "4) Wenn der Startpunkt klar ist, wird die Umsetzung leichter.",
+        "5) Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "direkt") {
+      return [
+        "1) Hör auf, bei jedem Content-Stück neu anzufangen.",
+        "2) GLE Prompt Studio gibt Creatorn und Solopreneuren schneller eine klare Struktur für Posts, Ads und Landingpages.",
+        "3)",
+        "- Weniger Zeitverlust bei der Vorbereitung.",
+        "- Klarere Vorgaben für wiederholbare Formate.",
+        "- Mehr Konsistenz über mehrere Inhalte hinweg.",
+        "4) Klare Struktur spart Zeit und macht Umsetzung einfacher.",
+        "5) Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "motiv") {
+      return [
+        "1) Mehr Klarheit, weniger Content-Stress.",
+        "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Ideen schneller in klare Inhalte zu verwandeln.",
+        "3)",
+        "- Du startest nicht mehr mit einem leeren Blatt.",
+        "- Wiederholbare Formate geben dir Sicherheit.",
+        "- Deine Content-Qualität bleibt besser nachvollziehbar.",
+        "4) Gute Inhalte entstehen leichter, wenn der Anfang klar ist.",
+        "5) Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "verkauf") {
+      return [
+        "1) Content braucht Struktur, bevor er verkauft.",
+        "2) GLE Prompt Studio hilft Creatorn und Solopreneuren, Posts, Ads und Landingpages klarer und schneller vorzubereiten.",
+        "3)",
+        "- Weniger Reibung bei der Content-Erstellung.",
+        "- Klarere Botschaften für wiederholbare Formate.",
+        "- Konsistentere Qualität über mehrere Ausgaben hinweg.",
+        "4) Wer schneller klare Inhalte vorbereitet, kann schneller veröffentlichen.",
+        "5) Zur Warteliste."
+      ].join("\n");
+    }
+  }
+
+  if (kind === "social") {
+    if (isEn) return output;
+
+    if (key === "locker") {
+      return [
+        "Content muss nicht kompliziert sein.",
+        "- Verwandle grobe Ideen schneller in klare Entwürfe.",
+        "- Bereite Posts, Ads und Landingpages entspannter vor.",
+        "- Halte wiederkehrende Formate leichter im Griff.",
+        "- Spare Zeit, ohne jeden Text neu zu zerdenken.",
+        "Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "direkt") {
+      return [
+        "Starte nicht jedes Mal bei null.",
+        "- Bereite Social Posts schneller vor.",
+        "- Erstelle klarere Anzeigen-Entwürfe.",
+        "- Strukturiere Landingpage-Ideen gezielter.",
+        "- Halte deine Content-Qualität über Formate hinweg stabil.",
+        "Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "motiv") {
+      return [
+        "Mehr Klarheit. Mehr Content.",
+        "- Komm schneller von der Idee zum Entwurf.",
+        "- Reduziere den Druck bei der Content-Erstellung.",
+        "- Nutze wiederholbare Formate für mehr Sicherheit.",
+        "- Bleib bei Posts, Ads und Landingpages konsistenter.",
+        "Zur Warteliste."
+      ].join("\n");
+    }
+
+    if (key === "verkauf") {
+      return [
+        "Mach deine Content-Vorbereitung verkaufsstärker.",
+        "- Formuliere klarere Botschaften für Posts und Ads.",
+        "- Bereite Landingpages mit besserer Struktur vor.",
+        "- Spare Zeit bei wiederkehrenden Verkaufsformaten.",
+        "- Halte Nutzen, Zielgruppe und CTA sauber zusammen.",
+        "Zur Warteliste."
+      ].join("\n");
+    }
+  }
+
+  return output;
+}
+
 function buildLinkedInFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2505,6 +2630,7 @@ Gib nur den finalen reparierten Content aus.
     // LinkedIn Post: deterministic beta fallback
     else if (isLinkedInPost) {
       output = buildLinkedInFallback({ outLang, topic });
+      output = applyToneFallback(output, { kind: "linkedin", tone, outLang });
       res.setHeader("x-gle-linkedin", "1");
     }
 
@@ -2514,6 +2640,7 @@ Gib nur den finalen reparierten Content aus.
 
       if (!validateSocialPost(output) || socialLooksWeak(output)) {
         output = buildSocialFallback({ outLang, topic });
+        output = applyToneFallback(output, { kind: "social", tone, outLang });
       } else {
         output = output
           .trim()
