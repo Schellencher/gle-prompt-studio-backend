@@ -2275,6 +2275,20 @@ app.post("/api/test", async (req, res) => {
   }
 });
 
+const stripePriceId = process.env.STRIPE_PRICE_ID || "";
+
+if (
+  !stripePriceId ||
+  stripePriceId === "price_" ||
+  stripePriceId === "DISABLED_FOR_BETA"
+) {
+  return res.status(503).json({
+    ok: false,
+    error: "checkout_disabled",
+    message: "Der PRO-Checkout ist während der Beta noch nicht verfügbar.",
+  });
+}
+
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     if (MAINTENANCE_MODE) return denyBilling(res);
