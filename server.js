@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 /**
  * GLE Prompt Studio Backend â€” CLEAN FINAL (v2.2)
@@ -879,7 +879,7 @@ function buildRepairPrompt({
       : "";
   const hitList = Array.isArray(hits) && hits.length ? hits.join(", ") : "";
 
-  // Social Media Post = strict 6 lines
+  // Social Media Post = strict 7 lines
   if (String(useCase || "").trim() === "Social Media Post") {
     return `
 You are a strict formatter AND copy editor.
@@ -895,13 +895,14 @@ TONE: ${tone}
 BANNED STEMS (must NOT appear):
 ${bannedAll || "(none)"}
 
-REQUIRED STRUCTURE (EXACTLY 6 LINES):
+REQUIRED STRUCTURE (EXACTLY 7 LINES):
 Line 1: Hook sentence (no title).
-Line 2: - Bullet point 1
-Line 3: - Bullet point 2
-Line 4: - Bullet point 3
-Line 5: - Bullet point 4
-Line 6: Specific CTA sentence with a clear action (comment/reply/click/write).
+Line 2: Short main text sentence (exactly one sentence, no bullet).
+Line 3: - Bullet point 1
+Line 4: - Bullet point 2
+Line 5: - Bullet point 3
+Line 6: - Bullet point 4
+Line 7: Specific CTA sentence with a clear action (comment/reply/click/write).
 
 STRICT RULES:
 - NO titles
@@ -1596,7 +1597,8 @@ function socialLooksWeak7(output) {
   if (lines.length !== 7) return true;
   if (lines.some((line) => line.length < 8)) return true;
   if (/\[[^\]]+\]/.test(text)) return true;
-  if (/dein thema|deine zielgruppe|your topic|target audience/.test(text)) return true;
+  if (/dein thema|deine zielgruppe|your topic|target audience/.test(text))
+    return true;
 
   return false;
 }
@@ -1607,6 +1609,7 @@ function buildSocialFallback({ outLang, topic }) {
   if (isEn) {
     return [
       "Create content with more structure.",
+      "GLE Prompt Studio helps turn rough ideas into clearer drafts for recurring content formats.",
       "- Draft social posts, ads and landing pages faster.",
       "- Spend less time preparing content.",
       "- Keep formats clear and easy to repeat.",
@@ -1617,10 +1620,11 @@ function buildSocialFallback({ outLang, topic }) {
 
   return [
     "Content klarer vorbereiten.",
-    "- EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages schneller vorbereiten.",
+    "GLE Prompt Studio hilft, grobe Ideen schneller in klare Entwürfe für wiederkehrende Content-Formate zu verwandeln.",
+    "- Entwürfe für Social Posts, Ads und Landingpages schneller vorbereiten.",
     "- Weniger Zeitverlust bei der Content-Erstellung.",
     "- Formate klarer und wiederholbarer halten.",
-    "- Konsistentere QualitÃ¤t Ã¼ber mehrere Ausgaben hinweg.",
+    "- Konsistentere Qualität über mehrere Ausgaben hinweg sichern.",
     "Zur Warteliste.",
   ].join("\n");
 }
@@ -2950,24 +2954,23 @@ Gib nur den finalen reparierten Content aus.
       res.setHeader("x-gle-linkedin", "1");
     }
 
-    // Social Post: strict 6 lines OR deterministic fallback
+    // Social Post: strict 7 lines OR deterministic fallback
     else if (isSocial) {
       output = stripMarkdownArtifacts(output);
 
       if (!validateSocialPost7(output) || socialLooksWeak7(output)) {
         output = buildSocialFallback({ outLang, topic });
-        output = applyToneFallback(output, { kind: "social", tone, outLang });
       } else {
         output = output
           .trim()
           .split("\n")
           .map((l) => l.trimEnd())
-          .slice(0, 6)
+          .slice(0, 7)
           .join("\n");
       }
 
       res.setHeader("x-gle-social", "1");
-      res.setHeader("x-gle-social-valid", String(validateSocialPost(output)));
+      res.setHeader("x-gle-social-valid", String(validateSocialPost7(output)));
     } else {
       res.setHeader("x-gle-social", "0");
 
