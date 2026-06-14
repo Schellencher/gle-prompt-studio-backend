@@ -2297,6 +2297,17 @@ app.post("/api/create-checkout-session", async (req, res) => {
         .status(500)
         .json({ ok: false, error: "stripe_not_configured" });
 
+    if (
+      STRIPE_PRICE_ID === "price_" ||
+      STRIPE_PRICE_ID === "DISABLED_FOR_BETA"
+    ) {
+      return res.status(503).json({
+        ok: false,
+        error: "checkout_disabled",
+        message: "Der PRO-Checkout ist während der Beta noch nicht verfügbar.",
+      });
+    }
+
     const { userId, accountId } = getIds(req);
     if (!accountId)
       return res.status(400).json({ ok: false, error: "missing_account_id" });
