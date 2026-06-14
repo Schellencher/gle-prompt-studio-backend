@@ -14,7 +14,7 @@
  * - OpenAI call: Responses API + fallback Chat Completions
  * - Server-side Bouncer: banned stems scan + rewrite passes + hard fail 422
  * - CTA normalizer + neutral CTA enforcement + hot-stem sanitizer (NON-social only)
- * - Social Media Post: strict 6-line validator + deterministic fallback
+ * - Social Media Post: strict 7-line validator + deterministic fallback
  * - Admin endpoint: set plan PRO/FREE via ADMIN_KEY
  */
 
@@ -910,7 +910,7 @@ STRICT RULES:
 - NO generic CTA
 - DO NOT add lines
 - DO NOT merge lines
-- Output ONLY the 6 lines
+- Output ONLY the 7 lines
 - If impossible: output FORMAT_ERROR
 
 Previous output (do NOT reuse directly):
@@ -1562,6 +1562,45 @@ function buildEmailFallback({ outLang, topic }) {
     "6) Abschlusssatz: Early Access ist geöffnet, der spätere Preis liegt bei 19,99€/Monat.",
   ].join("\n");
 }
+// SOCIAL_7_LINE_HELPER
+function validateSocialPost7(output) {
+  const lines = String(output || "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length !== 7) return false;
+  if (!lines[0] || /^[-•]/.test(lines[0])) return false;
+  if (!lines[1] || /^[-•]/.test(lines[1])) return false;
+
+  for (let i = 2; i <= 5; i += 1) {
+    if (!/^[-•]\s+\S/.test(lines[i])) return false;
+  }
+
+  if (!lines[6] || /^[-•]/.test(lines[6])) return false;
+  return true;
+}
+
+function socialLooksWeak7(output) {
+  const lines = String(output || "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const text = lines.join("\n").toLowerCase();
+
+  if (lines.length !== 7) return true;
+  if (lines.some((line) => line.length < 8)) return true;
+  if (/\[[^\]]+\]/.test(text)) return true;
+  if (/dein thema|deine zielgruppe|your topic|target audience/.test(text)) return true;
+
+  return false;
+}
+
 function buildSocialFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
 
@@ -2915,7 +2954,7 @@ Gib nur den finalen reparierten Content aus.
     else if (isSocial) {
       output = stripMarkdownArtifacts(output);
 
-      if (!validateSocialPost(output) || socialLooksWeak(output)) {
+      if (!validateSocialPost7(output) || socialLooksWeak7(output)) {
         output = buildSocialFallback({ outLang, topic });
         output = applyToneFallback(output, { kind: "social", tone, outLang });
       } else {
