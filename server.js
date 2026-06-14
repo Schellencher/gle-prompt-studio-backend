@@ -2285,7 +2285,8 @@ if (
   return res.status(503).json({
     ok: false,
     error: "checkout_disabled",
-    message: "Der PRO-Checkout ist während der Beta noch nicht verfügbar.",
+    message:
+      "Der PRO-Checkout ist während der Beta noch nicht verfügbar. / PRO checkout is not available during the beta yet.",
   });
 }
 
