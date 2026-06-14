@@ -2553,19 +2553,17 @@ app.post("/api/generate", async (req, res) => {
         apiKeyToUse = SERVER_OPENAI_KEY;
         modelToUse = wantsBoost ? MODEL_BOOST : MODEL_PRO;
       } else {
-        const tr = trialAllowed(acc);
-        if (tr.ok && SERVER_OPENAI_KEY) {
-          mode = "TRIAL_SERVER";
+        if (SERVER_OPENAI_KEY) {
+          mode = "FREE_SERVER";
           apiKeyToUse = SERVER_OPENAI_KEY;
           modelToUse = MODEL_PRO;
-          shouldBurnTrial = true;
+          shouldBurnTrial = false;
         } else {
           return res.status(400).json({
             ok: false,
             error: "missing_api_key",
             message:
-              "No BYOK key set. Start checkout (PRO) or set your OpenAI API key.",
-            trial: tr,
+              "Kein Server-API-Key verfügbar. Bitte später erneut versuchen oder eigenen OpenAI API-Key eintragen. / No server API key available. Please try again later or add your own OpenAI API key.",
             mode,
             model: ENGINE_BYOK,
           });
@@ -2578,11 +2576,13 @@ app.post("/api/generate", async (req, res) => {
       ? ENGINE_ULTRA
       : byokKey
         ? ENGINE_BYOK
-        : mode === "TRIAL_SERVER"
+        : mode === "FREE_SERVER"
           ? ENGINE_TRIAL
           : mode === "PRO_SERVER"
             ? ENGINE_PRO
-            : ENGINE_BYOK;
+            : mode === "TRIAL_SERVER"
+              ? ENGINE_TRIAL
+              : ENGINE_BYOK;
 
     res.setHeader("x-gle-engine", engineLabel);
     res.setHeader("x-gle-model", engineLabel);
