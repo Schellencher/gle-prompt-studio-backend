@@ -2912,7 +2912,7 @@ Gib nur den finalen reparierten Content aus.
     }
 
     // Product Description: deterministic beta fallback
-    if (isProductDescription) {
+    if (isProductDescription && !isSocial && !isLinkedInPost && !isEmailPost && !isBlogArticle && !isShortVideoScript && !isLandingPage) {
       output = buildProductDescriptionFallback({ outLang, topic });
       res.setHeader("x-gle-product", "1");
     }
@@ -3160,3 +3160,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`âœ… GLE Engine Online | Port: ${PORT}`);
 });
+
