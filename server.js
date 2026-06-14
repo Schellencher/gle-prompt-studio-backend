@@ -398,13 +398,13 @@ function computeCancelAt(account) {
   return c > 0 ? c : 0;
 }
 
-function enforceQuota(account, wantsBoost) {
+function enforceQuota(account, wantsBoost, shouldCountUsage = true) {
   ensureMonthlyBucket(account);
   const isPro = planIsPro(account);
   const used = Number(account.usage.used || 0);
   const limit = isPro ? PRO_LIMIT : FREE_LIMIT;
 
-  if (used >= limit) {
+  if (shouldCountUsage && used >= limit) {
     return {
       ok: false,
       error: "quota_reached",
@@ -431,12 +431,18 @@ function enforceQuota(account, wantsBoost) {
   return { ok: true };
 }
 
-function markUsage(account, wantsBoost) {
+function markUsage(account, wantsBoost, shouldCountUsage = true) {
   ensureMonthlyBucket(account);
-  account.usage.used = Number(account.usage.used || 0) + 1;
-  account.usage.lastTs = now();
-  if (wantsBoost)
+
+  if (shouldCountUsage) {
+    account.usage.used = Number(account.usage.used || 0) + 1;
+    account.usage.lastTs = now();
+  }
+
+  if (wantsBoost) {
     account.usage.boostUsed = Number(account.usage.boostUsed || 0) + 1;
+  }
+
   scheduleSave();
 }
 
@@ -2588,7 +2594,8 @@ app.post("/api/generate", async (req, res) => {
     res.setHeader("x-gle-model", engineLabel);
 
     // Quota
-    const quota = enforceQuota(acc, wantsBoost);
+    const shouldCountUsage = !byokKey;
+    const quota = enforceQuota(acc, wantsBoost, shouldCountUsage);
     if (!quota.ok) {
       const quotaMessage =
         quota.error === "boost_requires_pro"
@@ -3072,7 +3079,7 @@ Gib nur den finalen reparierten Content aus.
       markTrial(acc);
     }
 
-    markUsage(acc, wantsBoost);
+    markUsage(acc, wantsBoost, shouldCountUsage);
     if (isLandingPage) {
       output = sanitizeLandingPageOutput(output, { outLang });
       res.setHeader("x-gle-landing-sanitized", "1");
