@@ -2590,9 +2590,19 @@ app.post("/api/generate", async (req, res) => {
     // Quota
     const quota = enforceQuota(acc, wantsBoost);
     if (!quota.ok) {
+      const quotaMessage =
+        quota.error === "boost_requires_pro"
+          ? "Boost ist nur im PRO-Plan verfügbar. / Boost is only available in the PRO plan."
+          : quota.error === "boost_limit_reached"
+            ? "Dein PRO-Boost-Limit für diesen Monat ist erreicht. / Your PRO boost limit for this month has been reached."
+            : quota.error === "limit_reached"
+              ? "Dein Monatslimit ist erreicht. / Your monthly limit has been reached."
+              : "Limit erreicht oder Aktion nicht verfügbar. / Limit reached or action not available.";
+
       return res.status(429).json({
         ok: false,
         error: quota.error,
+        message: quotaMessage,
         used: quota.used,
         limit: quota.limit,
         renewAt: quota.renewAt,
