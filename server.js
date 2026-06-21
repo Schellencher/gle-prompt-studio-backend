@@ -2611,11 +2611,13 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    const betaEmail =
-      normalizeEmail(user?.email) ||
-      normalizeEmail(account?.email) ||
-      normalizeEmail(me?.email) ||
-      normalizeEmail(req.user?.email);
+    const betaEmail = normalizeEmail(
+      acc?.email ||
+        acc?.userEmail ||
+        acc?.accountEmail ||
+        req.user?.email ||
+        "",
+    );
 
     if (!isBetaAllowedEmail(betaEmail)) {
       return betaAccessDeniedResponse(req, res);
