@@ -27,6 +27,45 @@ const express = require("express");
 const cors = require("cors");
 const Stripe = require("stripe");
 
+const BETA_LOCK_ENABLED =
+  String(process.env.BETA_LOCK_ENABLED || "false").toLowerCase() === "true";
+
+const BETA_ALLOWED_EMAILS = new Set(
+  String(process.env.BETA_ALLOWED_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+function normalizeEmail(email) {
+  return String(email || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isBetaAllowedEmail(email) {
+  const normalized = normalizeEmail(email);
+  if (!BETA_LOCK_ENABLED) return true;
+  if (!normalized) return false;
+  return BETA_ALLOWED_EMAILS.has(normalized);
+}
+
+function betaAccessDeniedResponse(req, res) {
+  const lang = String(
+    req.body?.language || req.body?.lang || "de",
+  ).toLowerCase();
+
+  const message =
+    lang === "en"
+      ? "Access to GLE Prompt Studio is currently limited to invited beta testers."
+      : "Der Zugang zu GLE Prompt Studio ist aktuell auf eingeladene Beta-Tester beschränkt.";
+
+  return res.status(403).json({
+    error: "beta_access_required",
+    message,
+  });
+}
+
 // ---- fetch (Node 18+ has global fetch). Fallback to node-fetch@2 if needed.
 let _fetch = globalThis.fetch;
 if (!_fetch) {
@@ -2572,6 +2611,16 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
+    const betaEmail =
+      normalizeEmail(user?.email) ||
+      normalizeEmail(account?.email) ||
+      normalizeEmail(me?.email) ||
+      normalizeEmail(req.user?.email);
+
+    if (!isBetaAllowedEmail(betaEmail)) {
+      return betaAccessDeniedResponse(req, res);
+    }
+
     const { useCase, tone, topic, extra, outLang, boost } = normalizeInputs(
       req.body,
     );
@@ -2912,7 +2961,15 @@ Gib nur den finalen reparierten Content aus.
     }
 
     // Product Description: deterministic beta fallback
-    if (isProductDescription && !isSocial && !isLinkedInPost && !isEmailPost && !isBlogArticle && !isShortVideoScript && !isLandingPage) {
+    if (
+      isProductDescription &&
+      !isSocial &&
+      !isLinkedInPost &&
+      !isEmailPost &&
+      !isBlogArticle &&
+      !isShortVideoScript &&
+      !isLandingPage
+    ) {
       output = buildProductDescriptionFallback({ outLang, topic });
       res.setHeader("x-gle-product", "1");
     }
@@ -3160,4 +3217,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`âœ… GLE Engine Online | Port: ${PORT}`);
 });
-
