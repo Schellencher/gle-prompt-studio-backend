@@ -21,3 +21,4 @@ _hotfix/
 backup-vor-sprint1/
 server.js.backup-*
 !.env.gateway.example
+_beta_hotfix/

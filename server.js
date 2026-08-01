@@ -32,29 +32,9 @@ const {
   GLEGatewayError,
   toPublicError,
 } = require("./src/gateway");
+const { createBetaAccessControl } = require("./src/beta-access");
 
-const BETA_LOCK_ENABLED =
-  String(process.env.BETA_LOCK_ENABLED || "false").toLowerCase() === "true";
-
-const BETA_ALLOWED_EMAILS = new Set(
-  String(process.env.BETA_ALLOWED_EMAILS || "")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean),
-);
-
-function normalizeEmail(email) {
-  return String(email || "")
-    .trim()
-    .toLowerCase();
-}
-
-function isBetaAllowedEmail(email) {
-  const normalized = normalizeEmail(email);
-  if (!BETA_LOCK_ENABLED) return true;
-  if (!normalized) return false;
-  return BETA_ALLOWED_EMAILS.has(normalized);
-}
+const betaAccess = createBetaAccessControl(process.env);
 
 function betaAccessDeniedResponse(req, res) {
   const lang = String(
@@ -2283,6 +2263,7 @@ app.get("/api/health", (req, res) => {
     stripePriceId: STRIPE_PRICE_ID || "",
     models: { byok: MODEL_BYOK, pro: MODEL_PRO, boost: MODEL_BOOST },
     gateway: aiGateway.health(),
+    betaAccess: betaAccess.health(),
     limits: { FREE_LIMIT, PRO_LIMIT, PRO_BOOST_LIMIT },
     trial: { enabled: TRIAL_ENABLED, limit24h: TRIAL_LIMIT_24H },
     bouncer: {
@@ -2638,7 +2619,7 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    const betaEmail = normalizeEmail(
+    const betaEmail = betaAccess.normalizeEmail(
       acc?.email ||
         acc?.userEmail ||
         acc?.accountEmail ||
@@ -2646,7 +2627,13 @@ app.post("/api/generate", async (req, res) => {
         "",
     );
 
-    if (!isBetaAllowedEmail(betaEmail)) {
+    if (
+      !betaAccess.isAllowed({
+        email: betaEmail,
+        accountId,
+        userId,
+      })
+    ) {
       return betaAccessDeniedResponse(req, res);
     }
 

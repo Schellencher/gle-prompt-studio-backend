@@ -7,7 +7,8 @@
     "start": "node server.js",
     "test:gateway": "node test/gateway-smoke.test.js",
     "test:server-load": "node test/server-load-smoke.test.js",
-    "test": "npm run test:gateway && npm run test:server-load"
+    "test": "npm run test:gateway && npm run test:beta-access && npm run test:server-load",
+    "test:beta-access": "node test/beta-access.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
