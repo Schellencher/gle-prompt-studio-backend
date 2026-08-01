@@ -34,6 +34,18 @@ const {
 } = require("./src/gateway");
 const { createBetaAccessControl } = require("./src/beta-access");
 const {
+  PROFILE_LIMIT,
+  PROFILE_SCHEMA_VERSION,
+  MAX_PROOF_FACTS,
+  ProfileError,
+  ensureAccountProfiles,
+  listAccountProfiles,
+  getAccountProfile,
+  createAccountProfile,
+  updateAccountProfile,
+  deleteAccountProfile,
+} = require("./src/profiles");
+const {
   buildLandingpageJsonPrompt: buildLandingpageJsonPromptV2,
   buildLandingpageJsonRepairPrompt,
   renderLandingpageOutput: renderLandingpageOutputV2,
@@ -354,6 +366,7 @@ function getOrCreateAccount(accountId, userId) {
       usage: { monthKey: monthKeyFromTs(), used: 0, boostUsed: 0, lastTs: 0 },
       trial: { events: [] },
       apiKeyEnc: "",
+      profiles: [],
     };
     scheduleSave();
   } else if (uid && db.accounts[id].userId !== uid) {
@@ -362,6 +375,10 @@ function getOrCreateAccount(accountId, userId) {
   }
 
   syncStripeMode(db.accounts[id]);
+  if (!Array.isArray(db.accounts[id].profiles)) {
+    ensureAccountProfiles(db.accounts[id]);
+    scheduleSave();
+  }
   return db.accounts[id];
 }
 
@@ -411,6 +428,54 @@ function getApiKey(req) {
       req.body?.apiKey ||
       "",
   ).trim();
+}
+
+function resolveBetaAccount(req, res) {
+  const { userId, accountId } = getIds(req);
+  if (!accountId) {
+    res.status(400).json({ ok: false, error: "missing_account_id" });
+    return null;
+  }
+
+  const acc = getOrCreateAccount(accountId, userId);
+  const betaEmail = betaAccess.normalizeEmail(
+    acc?.email ||
+      acc?.userEmail ||
+      acc?.accountEmail ||
+      req.user?.email ||
+      "",
+  );
+
+  if (
+    !betaAccess.isAllowed({
+      email: betaEmail,
+      accountId,
+      userId,
+    })
+  ) {
+    betaAccessDeniedResponse(req, res);
+    return null;
+  }
+
+  return { acc, accountId, userId };
+}
+
+function sendProfileError(res, error) {
+  if (error instanceof ProfileError) {
+    return res.status(Number(error.status || 400)).json({
+      ok: false,
+      error: error.code || "profile_failed",
+      message: error.message || "Profile request failed",
+      details: error.details || undefined,
+    });
+  }
+
+  console.error("profile error:", error);
+  return res.status(500).json({
+    ok: false,
+    error: "profile_failed",
+    message: String(error?.message || error || "Profile request failed"),
+  });
 }
 
 function normalizeStripeTs(sec) {
@@ -2219,7 +2284,7 @@ app.use(
       if (allowedOrigin(origin)) return cb(null, true);
       return cb(new Error(`CORS blocked: ${origin}`), false);
     },
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "x-gle-user",
@@ -2269,6 +2334,12 @@ app.get("/api/health", (req, res) => {
     models: { byok: MODEL_BYOK, pro: MODEL_PRO, boost: MODEL_BOOST },
     gateway: aiGateway.health(),
     betaAccess: betaAccess.health(),
+    profiles: {
+      enabled: true,
+      limit: PROFILE_LIMIT,
+      schemaVersion: PROFILE_SCHEMA_VERSION,
+      maxProofFacts: MAX_PROOF_FACTS,
+    },
     limits: { FREE_LIMIT, PRO_LIMIT, PRO_BOOST_LIMIT },
     trial: { enabled: TRIAL_ENABLED, limit24h: TRIAL_LIMIT_24H },
     bouncer: {
@@ -2309,11 +2380,119 @@ app.get("/api/me", (req, res) => {
         monthKey: acc.usage?.monthKey || monthKeyFromTs(),
         boostUsed: Number(acc.usage?.boostUsed || 0),
       },
+      profiles: {
+        used: ensureAccountProfiles(acc).length,
+        limit: PROFILE_LIMIT,
+        schemaVersion: PROFILE_SCHEMA_VERSION,
+      },
       limits: { FREE_LIMIT, PRO_LIMIT, PRO_BOOST_LIMIT },
     });
   } catch (e) {
     console.error("/api/me error:", e);
     return res.status(500).json({ ok: false, error: "me_failed" });
+  }
+});
+
+// --------------------
+// Magic Context Light: saved profiles (max 3 per Studio account)
+// --------------------
+app.get("/api/profiles", (req, res) => {
+  try {
+    const resolved = resolveBetaAccount(req, res);
+    if (!resolved) return;
+
+    const profiles = listAccountProfiles(resolved.acc);
+    return res.json({
+      ok: true,
+      profiles,
+      used: profiles.length,
+      limit: PROFILE_LIMIT,
+      schemaVersion: PROFILE_SCHEMA_VERSION,
+    });
+  } catch (error) {
+    return sendProfileError(res, error);
+  }
+});
+
+app.get("/api/profiles/:profileId", (req, res) => {
+  try {
+    const resolved = resolveBetaAccount(req, res);
+    if (!resolved) return;
+
+    const profile = getAccountProfile(resolved.acc, req.params?.profileId);
+    if (!profile) {
+      throw new ProfileError("profile_not_found", "profile not found", 404, {
+        profileId: String(req.params?.profileId || ""),
+      });
+    }
+
+    return res.json({ ok: true, profile });
+  } catch (error) {
+    return sendProfileError(res, error);
+  }
+});
+
+app.post("/api/profiles", (req, res) => {
+  try {
+    const resolved = resolveBetaAccount(req, res);
+    if (!resolved) return;
+
+    const input = req.body?.profile ?? req.body ?? {};
+    const profile = createAccountProfile(resolved.acc, input);
+    scheduleSave();
+
+    return res.status(201).json({
+      ok: true,
+      profile,
+      used: ensureAccountProfiles(resolved.acc).length,
+      limit: PROFILE_LIMIT,
+    });
+  } catch (error) {
+    return sendProfileError(res, error);
+  }
+});
+
+app.put("/api/profiles/:profileId", (req, res) => {
+  try {
+    const resolved = resolveBetaAccount(req, res);
+    if (!resolved) return;
+
+    const input = req.body?.profile ?? req.body ?? {};
+    const profile = updateAccountProfile(
+      resolved.acc,
+      req.params?.profileId,
+      input,
+    );
+    scheduleSave();
+
+    return res.json({
+      ok: true,
+      profile,
+      used: ensureAccountProfiles(resolved.acc).length,
+      limit: PROFILE_LIMIT,
+    });
+  } catch (error) {
+    return sendProfileError(res, error);
+  }
+});
+
+app.delete("/api/profiles/:profileId", (req, res) => {
+  try {
+    const resolved = resolveBetaAccount(req, res);
+    if (!resolved) return;
+
+    const deleted = deleteAccountProfile(resolved.acc, req.params?.profileId);
+    scheduleSave();
+
+    return res.json({
+      ok: true,
+      deleted: true,
+      profileId: deleted.id,
+      used: ensureAccountProfiles(resolved.acc).length,
+      limit: PROFILE_LIMIT,
+    });
+  } catch (error) {
+    return sendProfileError(res, error);
   }
 });
 

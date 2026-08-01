@@ -23,3 +23,5 @@ server.js.backup-*
 !.env.gateway.example
 _beta_hotfix/
 _landing_hotfix/
+_sprint2_profiles/
+GLE_Backend_Sprint2_Start.zip

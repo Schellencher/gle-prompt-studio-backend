@@ -16,6 +16,8 @@ const routes = [];
 const app = {
   post(route, ...handlers) { routes.push({ method: "POST", route, handlers }); },
   get(route, ...handlers) { routes.push({ method: "GET", route, handlers }); },
+  put(route, ...handlers) { routes.push({ method: "PUT", route, handlers }); },
+  delete(route, ...handlers) { routes.push({ method: "DELETE", route, handlers }); },
   use() {},
   listen(port, host, cb) { if (typeof cb === "function") cb(); return { close() {} }; },
 };
@@ -45,4 +47,9 @@ try {
 assert.ok(routes.some((r) => r.method === "GET" && r.route === "/api/health"));
 assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/generate"));
 assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/test"));
+assert.ok(routes.some((r) => r.method === "GET" && r.route === "/api/profiles"));
+assert.ok(routes.some((r) => r.method === "GET" && r.route === "/api/profiles/:profileId"));
+assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/profiles"));
+assert.ok(routes.some((r) => r.method === "PUT" && r.route === "/api/profiles/:profileId"));
+assert.ok(routes.some((r) => r.method === "DELETE" && r.route === "/api/profiles/:profileId"));
 console.log("GLE server load smoke test passed");
