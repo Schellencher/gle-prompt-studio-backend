@@ -13,3 +13,11 @@ db/
 .env
 
 .vercel
+
+# GLE Sprint-1 lokale Arbeitsdateien
+GLE_Backend_Aktuell.zip
+_sprint1/
+_hotfix/
+backup-vor-sprint1/
+server.js.backup-*
+!.env.gateway.example

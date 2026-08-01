@@ -26,6 +26,12 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const Stripe = require("stripe");
+const {
+  createGateway,
+  createRequestId,
+  GLEGatewayError,
+  toPublicError,
+} = require("./src/gateway");
 
 const BETA_LOCK_ENABLED =
   String(process.env.BETA_LOCK_ENABLED || "false").toLowerCase() === "true";
@@ -100,6 +106,9 @@ const SERVER_OPENAI_KEY =
   String(process.env.OPENAI_API_KEY_SERVER || "").trim() ||
   String(process.env.OPENAI_API_KEY || "").trim();
 
+const SERVER_DEEPSEEK_KEY = String(process.env.DEEPSEEK_API_KEY || "").trim();
+const SERVER_AI_CONFIGURED = Boolean(SERVER_OPENAI_KEY || SERVER_DEEPSEEK_KEY);
+
 // Internal model IDs (never shown to users)
 const MODEL_BYOK = String(process.env.MODEL_BYOK || "gpt-4o-mini").trim();
 const MODEL_PRO = String(process.env.MODEL_PRO || "gpt-4o").trim();
@@ -118,6 +127,22 @@ const ENGINE_TRIAL = String(
 const ENGINE_ULTRA = String(
   process.env.ENGINE_ULTRA || "High-Density Engine (Ultra)",
 ).trim();
+
+
+// GLE Multi-Engine Gateway aliases. Defaults preserve the current OpenAI behavior.
+const GLE_PRO_ALIAS = String(process.env.GLE_PRO_ALIAS || "gle-balanced").trim();
+const GLE_BOOST_ALIAS = String(
+  process.env.GLE_BOOST_ALIAS || "gle-precision",
+).trim();
+const GLE_TRIAL_ALIAS = String(
+  process.env.GLE_TRIAL_ALIAS || "gle-balanced",
+).trim();
+
+const aiGateway = createGateway({
+  fetchImpl: _fetch,
+  dataDir: DATA_DIR,
+  env: process.env,
+});
 
 // --------------------
 // Limits / Trial
@@ -2229,6 +2254,8 @@ app.use(
       "x-gle-model",
       "x-gle-format-fix",
       "x-gle-structural-repair",
+      "x-gle-request-id",
+      "x-gle-provider",
     ],
   }),
 );
@@ -2255,6 +2282,7 @@ app.get("/api/health", (req, res) => {
     stripeMode: stripeModeLabel(),
     stripePriceId: STRIPE_PRICE_ID || "",
     models: { byok: MODEL_BYOK, pro: MODEL_PRO, boost: MODEL_BOOST },
+    gateway: aiGateway.health(),
     limits: { FREE_LIMIT, PRO_LIMIT, PRO_BOOST_LIMIT },
     trial: { enabled: TRIAL_ENABLED, limit24h: TRIAL_LIMIT_24H },
     bouncer: {
@@ -2348,35 +2376,31 @@ app.post("/api/test", async (req, res) => {
     if (!key)
       return res.status(400).json({ ok: false, error: "missing_api_key" });
 
-    const text = await callOpenAI({
-      apiKey: key,
+    const requestId = createRequestId("gle_test");
+    const result = await aiGateway.generate({
+      requestId,
+      stage: "api_test",
+      provider: "openai",
       model: MODEL_BYOK,
+      apiKeyOverride: key,
       prompt: "ping",
       temperature: 0.0,
+      metadata: { route: "/api/test", mode: "BYOK" },
     });
 
-    return res.json({ ok: true, sample: String(text).slice(0, 40) });
+    res.setHeader("x-gle-request-id", requestId);
+    res.setHeader("x-gle-provider", result.execution.provider);
+    return res.json({
+      ok: true,
+      requestId,
+      sample: String(result.output).slice(0, 40),
+    });
   } catch (e) {
     return res
       .status(400)
       .json({ ok: false, error: String(e?.message || "bad_key") });
   }
 });
-
-const stripePriceId = process.env.STRIPE_PRICE_ID || "";
-
-if (
-  !stripePriceId ||
-  stripePriceId === "price_" ||
-  stripePriceId === "DISABLED_FOR_BETA"
-) {
-  return res.status(503).json({
-    ok: false,
-    error: "checkout_disabled",
-    message:
-      "Der PRO-Checkout ist während der Beta noch nicht verfügbar. / PRO checkout is not available during the beta yet.",
-  });
-}
 
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
@@ -2590,6 +2614,9 @@ app.post("/api/create-portal-session", handlePortalSession); // alias/fallback
 // Generate (SINGLE ROUTE - FINAL)
 // --------------------
 app.post("/api/generate", async (req, res) => {
+  const gatewayRequestId = createRequestId();
+  res.setHeader("x-gle-request-id", gatewayRequestId);
+
   try {
     console.log("GLE_GENERATE_MARKER:", process.env.BUILD_TAG || "no-tag");
     res.setHeader("x-gle-build", String(process.env.BUILD_TAG || "no-tag"));
@@ -2648,12 +2675,12 @@ app.post("/api/generate", async (req, res) => {
     let shouldBurnTrial = false;
 
     if (!byokKey) {
-      if (isPro && SERVER_OPENAI_KEY) {
+      if (isPro && SERVER_AI_CONFIGURED) {
         mode = "PRO_SERVER";
         apiKeyToUse = SERVER_OPENAI_KEY;
         modelToUse = wantsBoost ? MODEL_BOOST : MODEL_PRO;
       } else {
-        if (SERVER_OPENAI_KEY) {
+        if (SERVER_AI_CONFIGURED) {
           mode = "FREE_SERVER";
           apiKeyToUse = SERVER_OPENAI_KEY;
           modelToUse = MODEL_PRO;
@@ -2686,6 +2713,52 @@ app.post("/api/generate", async (req, res) => {
 
     res.setHeader("x-gle-engine", engineLabel);
     res.setHeader("x-gle-model", engineLabel);
+
+    // Server-funded requests use stable GLE aliases. BYOK remains OpenAI-compatible
+    // and keeps the user's selected/current model behavior unchanged.
+    const gatewayAlias = byokKey
+      ? null
+      : wantsBoost
+        ? GLE_BOOST_ALIAS
+        : mode === "PRO_SERVER"
+          ? GLE_PRO_ALIAS
+          : GLE_TRIAL_ALIAS;
+
+    const gatewayExecutions = [];
+    let gatewayCallIndex = 0;
+
+    async function callStudioModel({ prompt, temperature, stage }) {
+      gatewayCallIndex += 1;
+      const result = await aiGateway.generate({
+        requestId: gatewayRequestId,
+        stage:
+          stage ||
+          (gatewayCallIndex === 1
+            ? "generate"
+            : `repair_${gatewayCallIndex - 1}`),
+        ...(byokKey
+          ? {
+              provider: "openai",
+              model: modelToUse,
+              apiKeyOverride: apiKeyToUse,
+            }
+          : { alias: gatewayAlias }),
+        prompt,
+        temperature,
+        metadata: {
+          route: "/api/generate",
+          mode,
+          useCase: String(useCase || "").slice(0, 80),
+          boost: wantsBoost,
+        },
+      });
+
+      gatewayExecutions.push(result.execution);
+      if (gatewayExecutions.length === 1) {
+        res.setHeader("x-gle-provider", result.execution.provider);
+      }
+      return result.output;
+    }
 
     // Quota
     const shouldCountUsage = !byokKey;
@@ -2771,11 +2844,10 @@ app.post("/api/generate", async (req, res) => {
         });
 
     // 1) First pass
-    let output = await callOpenAI({
-      apiKey: apiKeyToUse,
-      model: modelToUse,
+    let output = await callStudioModel({
       prompt: masterPrompt,
       temperature: isLandingPage ? 0.35 : 0.6,
+      stage: "generate",
     });
 
     // Landingpage/SaaS: JSON vom Modell â†’ Backend rendert festes Format
@@ -2806,11 +2878,10 @@ ALTER OUTPUT:
 ${output}
 `.trim();
 
-        const repairedJsonText = await callOpenAI({
-          apiKey: apiKeyToUse,
-          model: modelToUse,
+        const repairedJsonText = await callStudioModel({
           prompt: jsonRepairPrompt,
           temperature: 0.0,
+          stage: "landingpage_json_repair",
         });
 
         parsed = extractJsonObject(repairedJsonText);
@@ -2929,11 +3000,10 @@ ${output}
 Gib nur den finalen reparierten Content aus.
 `.trim();
 
-      output = await callOpenAI({
-        apiKey: apiKeyToUse,
-        model: modelToUse,
+      output = await callStudioModel({
         prompt: repairPrompt,
         temperature: 0.3,
+        stage: "structural_repair",
       });
     }
 
@@ -2953,11 +3023,10 @@ Gib nur den finalen reparierten Content aus.
           outLang,
         });
 
-        output = await callOpenAI({
-          apiKey: apiKeyToUse,
-          model: modelToUse,
+        output = await callStudioModel({
           prompt: repair,
           temperature: 0.0,
+          stage: `bouncer_repair_${i + 1}`,
         });
       }
     }
@@ -3190,6 +3259,7 @@ Gib nur den finalen reparierten Content aus.
     return res.json({
       ok: true,
       output,
+      requestId: gatewayRequestId,
       mode,
       model: engineLabel,
       plan: planIsPro(acc) ? "PRO" : "FREE",
@@ -3202,10 +3272,20 @@ Gib nur den finalen reparierten Content aus.
     });
   } catch (e) {
     console.error("generate error:", e);
+
+    if (e instanceof GLEGatewayError) {
+      const publicError = toPublicError(e);
+      return res.status(Number(e.status || 500)).json({
+        ...publicError,
+        requestId: gatewayRequestId,
+      });
+    }
+
     return res.status(500).json({
       ok: false,
       error: "generate_failed",
       message: e?.message || String(e),
+      requestId: gatewayRequestId,
     });
   }
 });
