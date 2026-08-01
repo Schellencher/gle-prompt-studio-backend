@@ -33,6 +33,11 @@ const {
   toPublicError,
 } = require("./src/gateway");
 const { createBetaAccessControl } = require("./src/beta-access");
+const {
+  buildLandingpageJsonPrompt: buildLandingpageJsonPromptV2,
+  buildLandingpageJsonRepairPrompt,
+  renderLandingpageOutput: renderLandingpageOutputV2,
+} = require("./src/landingpage-structured");
 
 const betaAccess = createBetaAccessControl(process.env);
 
@@ -2815,7 +2820,7 @@ app.post("/api/generate", async (req, res) => {
         .includes("product description");
 
     const masterPrompt = isLandingPage
-      ? buildLandingpageJsonPrompt({
+      ? buildLandingpageJsonPromptV2({
           useCase: String(useCase || "").trim(),
           tone,
           topic,
@@ -2843,27 +2848,11 @@ app.post("/api/generate", async (req, res) => {
 
       // Wenn das Modell kein gÃ¼ltiges JSON liefert: einmal hart als JSON reparieren
       if (!parsed) {
-        const jsonRepairPrompt = `
-Du hast ungÃ¼ltigen Output geliefert.
-Wandle den folgenden Inhalt in gÃ¼ltiges JSON um.
-Gib ausschlieÃŸlich JSON aus. Kein Markdown. Keine ErklÃ¤rung.
-
-JSON-SCHEMA:
-{
-  "headline": "maximal 9 WÃ¶rter",
-  "subheadline": "ein natÃ¼rlicher Satz",
-  "bullets": ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4", "Bullet 5"],
-  "cta": "Zur Warteliste.",
-  "faq": [
-    { "q": "Frage 1", "a": "Antwort 1" },
-    { "q": "Frage 2", "a": "Antwort 2" },
-    { "q": "Frage 3", "a": "Antwort 3" }
-  ]
-}
-
-ALTER OUTPUT:
-${output}
-`.trim();
+        const jsonRepairPrompt = buildLandingpageJsonRepairPrompt({
+          badOutput: output,
+          topic,
+          outLang,
+        });
 
         const repairedJsonText = await callStudioModel({
           prompt: jsonRepairPrompt,
@@ -2875,40 +2864,11 @@ ${output}
       }
 
       if (parsed) {
-        output = renderLandingpageOutput(parsed, outLang);
+        output = renderLandingpageOutputV2(parsed, { outLang, topic });
         res.setHeader("x-gle-structured", "landingpage-json");
       } else {
         // Niemals rohen Modelltext ausgeben, wenn Landingpage-JSON fehlschlÃ¤gt
-        output = renderLandingpageOutput(
-          {
-            headline: "Content schneller strukturieren",
-            subheadline:
-              "GLE Prompt Studio erstellt strukturierte EntwÃ¼rfe fÃ¼r Social Posts, Ads und Landingpages.",
-            bullets: [
-              "Weniger Zeitverlust bei der Content-Erstellung.",
-              "Klarere EntwÃ¼rfe fÃ¼r konkrete KanÃ¤le.",
-              "Konsistentere TextqualitÃ¤t Ã¼ber mehrere Formate hinweg.",
-              "Geeignet fÃ¼r Creator und Solopreneure.",
-              "Early Access verfÃ¼gbar, PRO folgt spÃ¤ter.",
-            ],
-            cta: "Zur Warteliste.",
-            faq: [
-              {
-                q: "Was ist GLE Prompt Studio?",
-                a: "Ein Tool fÃ¼r strukturierte Social Posts, Ads und Landingpages.",
-              },
-              {
-                q: "FÃ¼r wen ist GLE Prompt Studio gedacht?",
-                a: "FÃ¼r Creator und Solopreneure, die Inhalte klarer vorbereiten mÃ¶chten.",
-              },
-              {
-                q: "Was kostet GLE Prompt Studio spÃ¤ter?",
-                a: "Der geplante PRO-Preis liegt spÃ¤ter bei 19,99â‚¬ pro Monat.",
-              },
-            ],
-          },
-          outLang,
-        );
+        output = renderLandingpageOutputV2({}, { outLang, topic });
 
         res.setHeader("x-gle-structured", "landingpage-json-fallback");
       }
@@ -3238,8 +3198,9 @@ Gib nur den finalen reparierten Content aus.
 
     markUsage(acc, wantsBoost, shouldCountUsage);
     if (isLandingPage) {
-      output = sanitizeLandingPageOutput(output, { outLang });
-      res.setHeader("x-gle-landing-sanitized", "1");
+      // The structured V2 landing-page path is topic-safe and must not inject
+      // GLE-specific fallback bullets or pricing into unrelated user topics.
+      res.setHeader("x-gle-landing-sanitized", "v2-topic-safe");
     }
 
     output = repairEncodingArtifacts(output);
