@@ -53,7 +53,7 @@ assert.throws(
 );
 
 const noProfileBlock = buildGroundingPromptBlock();
-assert(noProfileBlock.includes("GLE_GROUNDING_RULES_V1"));
+assert(noProfileBlock.includes("GLE_GROUNDING_RULES_V2"));
 assert(noProfileBlock.includes("Do not invent product features"));
 assert(noProfileBlock.includes("employee results"));
 assert(!noProfileBlock.includes("GLE_MAGIC_CONTEXT_PROFILE_V1"));
@@ -64,5 +64,7 @@ assert(profileBlock.includes("Nordlicht"));
 assert(profileBlock.includes("bis zu 12 Stunden"));
 assert(profileBlock.includes("USB-C"));
 assert(profileBlock.includes("not independently verified world truth"));
+assert(profileBlock.includes("Natural wording is allowed"));
+assert(profileBlock.includes("Do not add benefits, suitability, performance"));
 
 console.log("GLE generation context test passed");

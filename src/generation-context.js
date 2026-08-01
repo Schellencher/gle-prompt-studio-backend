@@ -33,7 +33,7 @@ function resolveGenerationProfile(account, body) {
 
 function buildGroundingPromptBlock({ profile = null } = {}) {
   const parts = [
-    "[GLE_GROUNDING_RULES_V1]",
+    "[GLE_GROUNDING_RULES_V2]",
     "Grounding rules for the final content:",
     "- Treat the user's THEMA and FORMAT / Anforderungen as the source of truth for project-, company-, product-, service- and experience-specific facts.",
     "- Do not invent product features, prices, availability, customer feedback, employee results, measured outcomes, timelines, studies, sources, certifications, health effects or performance claims that the user did not provide.",
@@ -47,13 +47,16 @@ function buildGroundingPromptBlock({ profile = null } = {}) {
     parts.push(
       "- A selected Magic Context profile follows below. Its approved profile facts may be used as user-approved context, but they are not independently verified world truth.",
       "- Do not contradict approved profile facts. Do not infer additional profile-specific facts beyond what the profile says.",
+      "- Natural wording is allowed, but every factual product/company/project claim must be directly supported by approved profile facts.",
+      "- Do not add benefits, suitability, performance, quality adjectives, use cases, causal effects or implications unless they are explicitly approved facts.",
+      "- Prefer one concise natural sentence that combines the approved facts instead of adding explanatory claims.",
       buildProfilePromptBlock(profile),
     );
   }
 
   parts.push(
     "Keep the originally requested output format exactly.",
-    "[END_GLE_GROUNDING_RULES_V1]",
+    "[END_GLE_GROUNDING_RULES_V2]",
   );
 
   return parts.join("\n");

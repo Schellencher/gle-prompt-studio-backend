@@ -49,7 +49,7 @@ const {
   resolveGenerationProfile,
   buildGroundingPromptBlock,
 } = require("./src/generation-context");
-const { applyStrictProfileFactGuard } = require("./src/fact-guard");
+const { applyClaimAwareFactGuard } = require("./src/fact-guard");
 const {
   buildLandingpageJsonPrompt: buildLandingpageJsonPromptV2,
   buildLandingpageJsonRepairPrompt,
@@ -3314,12 +3314,13 @@ app.post("/api/generate", async (req, res) => {
       }
     }
 
-    // Proof-of-Execution / Fact Guard v1 (strict scope):
-    // For product descriptions with selected approved Proof Facts, do not trust
-    // model-authored product claims in the final response. Render only the
-    // structured approved facts. This verifies alignment to the selected
-    // profile facts; it does NOT verify world truth.
-    const guardedResult = applyStrictProfileFactGuard({
+    // Proof-of-Execution / Fact Guard v2 (claim-aware scope):
+    // Product descriptions with selected approved Proof Facts may keep natural
+    // model wording only when every factual claim can be deterministically
+    // matched to approved facts and all approved facts are covered. Otherwise
+    // the unsafe draft is withheld and replaced with a safe natural renderer,
+    // while the proof status becomes REVIEW_REQUIRED.
+    const guardedResult = applyClaimAwareFactGuard({
       output,
       profile: activeProfile,
       isProductDescription,
@@ -3328,7 +3329,7 @@ app.post("/api/generate", async (req, res) => {
     output = guardedResult.output;
     const proofResult = guardedResult.proof;
     res.setHeader("x-gle-proof-status", String(proofResult.status || "NOT_VERIFIED"));
-    res.setHeader("x-gle-proof-mode", String(proofResult.mode || "strict-profile-facts-v1"));
+    res.setHeader("x-gle-proof-mode", String(proofResult.mode || "claim-aware-profile-facts-v2"));
 
     if (shouldBurnTrial) {
       markTrial(acc);
