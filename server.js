@@ -49,6 +49,7 @@ const {
   resolveGenerationProfile,
   buildGroundingPromptBlock,
 } = require("./src/generation-context");
+const { applyStrictProfileFactGuard } = require("./src/fact-guard");
 const {
   buildLandingpageJsonPrompt: buildLandingpageJsonPromptV2,
   buildLandingpageJsonRepairPrompt,
@@ -3313,6 +3314,22 @@ app.post("/api/generate", async (req, res) => {
       }
     }
 
+    // Proof-of-Execution / Fact Guard v1 (strict scope):
+    // For product descriptions with selected approved Proof Facts, do not trust
+    // model-authored product claims in the final response. Render only the
+    // structured approved facts. This verifies alignment to the selected
+    // profile facts; it does NOT verify world truth.
+    const guardedResult = applyStrictProfileFactGuard({
+      output,
+      profile: activeProfile,
+      isProductDescription,
+      outLang,
+    });
+    output = guardedResult.output;
+    const proofResult = guardedResult.proof;
+    res.setHeader("x-gle-proof-status", String(proofResult.status || "NOT_VERIFIED"));
+    res.setHeader("x-gle-proof-mode", String(proofResult.mode || "strict-profile-facts-v1"));
+
     if (shouldBurnTrial) {
       markTrial(acc);
     }
@@ -3336,6 +3353,7 @@ app.post("/api/generate", async (req, res) => {
         profileVersion: activeProfile ? Number(activeProfile.version || 1) : null,
         proofFactsCount: activeProfile?.proofFacts?.length || 0,
       },
+      proof: proofResult,
       mode,
       model: engineLabel,
       plan: planIsPro(acc) ? "PRO" : "FREE",
