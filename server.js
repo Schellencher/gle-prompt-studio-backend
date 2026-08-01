@@ -953,7 +953,7 @@ HARTE REGELN:
 - Wenn ein Format Punkt 1), 2), 3) usw. verlangt, muss jeder Punkt vollstÃ¤ndig ausgefÃ¼llt sein.
 - CTA nur einmal ausgeben.
 - Wenn im Format bereits "CTA-Zeile" verlangt wird, dann KEINE zusÃ¤tzliche CTA am Ende anhÃ¤ngen.
-- CTA neutral halten, z.B. "Zur Warteliste.", "Early Access: Eintragen.", "Mehr erfahren."
+- CTA neutral halten, z.B. "Mehr erfahren.", "Details ansehen.", "Kontakt aufnehmen."
 - FAQ sauber schreiben: Frage und Antwort jeweils vollstÃ¤ndig, keine halben Zeilen.
 - Schreibe konkret: was + fÃ¼r wen + Ergebnis, in einfachen Worten.
 - Ausgabe: nur der finale Content.
@@ -965,6 +965,7 @@ QUALITÃ„TSREGELN:
 - Kein "Link in Bio".
 - Kein doppelter CTA.
 - Wenn der Nutzer ein exaktes Format vorgibt, halte dieses Format ein und fÃ¼lle jeden Punkt vollstÃ¤ndig.
+- Erfinde keine Marken, Produktnamen, Zielgruppen, Preise, Verfuegbarkeiten, Studien, Quellen oder Leistungsversprechen, die nicht in THEMA oder FORMAT / Anforderungen stehen.
 
 THEMA:
 ${cleanTopic || "(kein Thema angegeben)"}
@@ -1719,27 +1720,30 @@ function socialLooksWeak7(output) {
 
 function buildSocialFallback({ outLang, topic }) {
   const isEn = String(outLang || "").toLowerCase() === "en";
+  const subject = String(topic || "").trim();
 
   if (isEn) {
+    const safeTopic = subject || "This topic";
     return [
-      "Create content with more structure.",
-      "GLE Prompt Studio helps turn rough ideas into clearer drafts for recurring content formats.",
-      "- Draft social posts, ads and landing pages faster.",
-      "- Spend less time preparing content.",
-      "- Keep formats clear and easy to repeat.",
-      "- Maintain consistent quality across outputs.",
-      "Join the waitlist.",
+      `${safeTopic}: the key point at a glance.`,
+      "A clear structure helps separate known information from open questions.",
+      "- Focus on the central point.",
+      "- Keep claims tied to the information provided.",
+      "- Separate facts from assumptions.",
+      "- Leave unsupported details out.",
+      "Learn more about the topic.",
     ].join("\n");
   }
 
+  const safeTopic = subject || "Dieses Thema";
   return [
-    "Content klarer vorbereiten.",
-    "GLE Prompt Studio hilft, grobe Ideen schneller in klare Entwürfe für wiederkehrende Content-Formate zu verwandeln.",
-    "- Entwürfe für Social Posts, Ads und Landingpages schneller vorbereiten.",
-    "- Weniger Zeitverlust bei der Content-Erstellung.",
-    "- Formate klarer und wiederholbarer halten.",
-    "- Konsistentere Qualität über mehrere Ausgaben hinweg sichern.",
-    "Zur Warteliste.",
+    `${safeTopic}: das Wichtigste auf einen Blick.`,
+    "Eine klare Struktur hilft, bekannte Informationen und offene Fragen sauber zu trennen.",
+    "- Den zentralen Punkt in den Fokus stellen.",
+    "- Aussagen an die vorhandenen Angaben binden.",
+    "- Fakten und Annahmen klar voneinander trennen.",
+    "- Nicht belegte Details weglassen.",
+    "Mehr zum Thema erfahren.",
   ].join("\n");
 }
 
@@ -3060,71 +3064,22 @@ app.post("/api/generate", async (req, res) => {
       (/^\s*\d+\)\s*$/im.test(output) ||
         /\n\s*CTA-Zeile:/i.test(output) ||
         output.split("\n").length < 5 ||
-        /Content erstellen|konsistent Inhalte|Wer kann .* Content erstellen|CTA-Zeile:\s*Zur Warteliste/i.test(
+        /Content erstellen|konsistent Inhalte|Wer kann .* Content erstellen/i.test(
           output,
         ));
+
     if (needsStructuralRepair) {
       res.setHeader("x-gle-structural-repair", "1");
 
-      const repairPrompt = `
-Du bist ein strenger deutscher SaaS-Copy-Editor.
-
-Schreibe den Content KOMPLETT NEU.
-Nicht flicken. Nicht einzelne WÃ¶rter ersetzen. Komplett sauber neu ausgeben.
-
-Zielsprache: ${outLang}
-Use-Case: ${useCase}
-Ton: ${tone}
-
-THEMA:
-${topic}
-
-FORMAT MUSS EXAKT SO AUSSEHEN:
-
-1) Headline: [maximal 9 WÃ¶rter]
-2) Subheadline: [ein natÃ¼rlicher Satz]
-3) Bulletpoints:
-- [vollstÃ¤ndiger Bulletpoint 1]
-- [vollstÃ¤ndiger Bulletpoint 2]
-- [vollstÃ¤ndiger Bulletpoint 3]
-- [vollstÃ¤ndiger Bulletpoint 4]
-- [vollstÃ¤ndiger Bulletpoint 5]
-4) CTA-Zeile: [genau 1 neutrale CTA, kein zusÃ¤tzlicher CTA danach]
-5) Mini-FAQ:
-- Frage: [Frage 1]
-  Antwort: [Antwort 1 als vollstÃ¤ndiger Satz]
-- Frage: [Frage 2]
-  Antwort: [Antwort 2 als vollstÃ¤ndiger Satz]
-- Frage: [Frage 3]
-  Antwort: [Antwort 3 als vollstÃ¤ndiger Satz]
-
-VERBOTEN:
-- "3)" ohne "Bulletpoints:"
-- "4)" ohne "CTA-Zeile:"
-- ein zusÃ¤tzlicher CTA nach Punkt 5
-- "Content erstellen" als Satzfragment
-- "Wer kann ... Content erstellen?"
-- Sie-Form, also "Sie", "Ihr", "Ihre", "Ihren"
-
-HARTE REGELN:
-- Keine leeren Zeilen nach Nummernpunkten.
-- Kein leerer Punkt wie "3)".
-- Kein zusÃ¤tzlicher CTA am Ende.
-- Keine kaputten SÃ¤tze.
-- Kein "Link in Bio".
-- Kein Meta-Text.
-- Keine Emojis.
-- Keine technischen Begriffe wie GPT, API, Modell, BYOK.
-- Schreibe natÃ¼rlich, ruhig und verkaufbar.
-
-ZUSATZANFORDERUNGEN:
-${extra}
-
-ALTER SCHLECHTER OUTPUT:
-${output}
-
-Gib nur den finalen reparierten Content aus.
-`.trim();
+      const repairPrompt = buildRepairPrompt({
+        badOutput: output,
+        hits: ["structural_format"],
+        useCase,
+        tone,
+        topic,
+        extra,
+        outLang,
+      });
 
       output = await callStudioModel({
         prompt: repairPrompt,
@@ -3157,7 +3112,8 @@ Gib nur den finalen reparierten Content aus.
       }
     }
 
-    // Product Description: deterministic beta fallback
+    // Non-social use-cases keep the model output.
+    // Old beta fallbacks used to overwrite the user's topic with GLE demo copy.
     if (
       isProductDescription &&
       !isSocial &&
@@ -3167,44 +3123,14 @@ Gib nur den finalen reparierten Content aus.
       !isShortVideoScript &&
       !isLandingPage
     ) {
-      output = buildProductDescriptionFallback({ outLang, topic });
       res.setHeader("x-gle-product", "1");
-    }
-
-    // E-Mail: deterministic beta fallback
-    else if (isEmailPost) {
-      output = buildEmailFallback({ outLang, topic });
-      output = applyExtendedToneFallback(output, {
-        kind: "email",
-        tone,
-        outLang,
-      });
+    } else if (isEmailPost) {
       res.setHeader("x-gle-email", "1");
-    }
-    // Blogartikel: deterministic beta fallback
-    else if (isBlogArticle) {
-      output = buildBlogFallback({ outLang, topic });
-      output = applyExtendedToneFallback(output, {
-        kind: "blog",
-        tone,
-        outLang,
-      });
+    } else if (isBlogArticle) {
       res.setHeader("x-gle-blog", "1");
-    }
-    // Kurzvideo-Skript: deterministic beta fallback
-    else if (isShortVideoScript) {
-      output = buildShortVideoFallback({ outLang, topic });
-      output = applyExtendedToneFallback(output, {
-        kind: "video",
-        tone,
-        outLang,
-      });
+    } else if (isShortVideoScript) {
       res.setHeader("x-gle-video", "1");
-    }
-    // LinkedIn Post: deterministic beta fallback
-    else if (isLinkedInPost) {
-      output = buildLinkedInFallback({ outLang, topic });
-      output = applyToneFallback(output, { kind: "linkedin", tone, outLang });
+    } else if (isLinkedInPost) {
       res.setHeader("x-gle-linkedin", "1");
     }
 
