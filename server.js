@@ -46,6 +46,10 @@ const {
   deleteAccountProfile,
 } = require("./src/profiles");
 const {
+  resolveGenerationProfile,
+  buildGroundingPromptBlock,
+} = require("./src/generation-context");
+const {
   buildLandingpageJsonPrompt: buildLandingpageJsonPromptV2,
   buildLandingpageJsonRepairPrompt,
   renderLandingpageOutput: renderLandingpageOutputV2,
@@ -2830,6 +2834,13 @@ app.post("/api/generate", async (req, res) => {
     );
     const wantsBoost = boost === true;
 
+    // Magic Context Light / Proof Facts are opt-in per generation request.
+    // Invalid profile IDs fail before quota/model usage is consumed.
+    const activeProfile = resolveGenerationProfile(acc, req.body);
+    const groundingPromptBlock = buildGroundingPromptBlock({
+      profile: activeProfile,
+    });
+
     ensureMonthlyBucket(acc);
 
     const byokKey = getApiKey(req);
@@ -2925,6 +2936,9 @@ app.post("/api/generate", async (req, res) => {
           mode,
           useCase: String(useCase || "").slice(0, 80),
           boost: wantsBoost,
+          contextProfileId: activeProfile?.id || null,
+          contextProfileVersion: activeProfile ? Number(activeProfile.version || 1) : null,
+          proofFactsCount: activeProfile?.proofFacts?.length || 0,
         },
       });
 
@@ -3002,7 +3016,7 @@ app.post("/api/generate", async (req, res) => {
         .toLowerCase()
         .includes("product description");
 
-    const masterPrompt = isLandingPage
+    let masterPrompt = isLandingPage
       ? buildLandingpageJsonPromptV2({
           useCase: String(useCase || "").trim(),
           tone,
@@ -3014,9 +3028,11 @@ app.post("/api/generate", async (req, res) => {
           useCase: String(useCase || "").trim(),
           tone,
           topic,
-          extra,
+          extra: `${extra || ""}\n\n${groundingPromptBlock}`.trim(),
           outLang,
         });
+
+    masterPrompt = `${masterPrompt}\n\n${groundingPromptBlock}`.trim();
 
     // 1) First pass
     let output = await callStudioModel({
@@ -3077,7 +3093,7 @@ app.post("/api/generate", async (req, res) => {
         useCase,
         tone,
         topic,
-        extra,
+        extra: `${extra || ""}\n\n${groundingPromptBlock}`.trim(),
         outLang,
       });
 
@@ -3313,6 +3329,13 @@ app.post("/api/generate", async (req, res) => {
       ok: true,
       output,
       requestId: gatewayRequestId,
+      grounding: {
+        mode: "light-v1",
+        profileApplied: !!activeProfile,
+        profileId: activeProfile?.id || null,
+        profileVersion: activeProfile ? Number(activeProfile.version || 1) : null,
+        proofFactsCount: activeProfile?.proofFacts?.length || 0,
+      },
       mode,
       model: engineLabel,
       plan: planIsPro(acc) ? "PRO" : "FREE",
@@ -3325,6 +3348,10 @@ app.post("/api/generate", async (req, res) => {
     });
   } catch (e) {
     console.error("generate error:", e);
+
+    if (e instanceof ProfileError) {
+      return sendProfileError(res, e);
+    }
 
     if (e instanceof GLEGatewayError) {
       const publicError = toPublicError(e);

@@ -7,11 +7,12 @@
     "start": "node server.js",
     "test:gateway": "node test/gateway-smoke.test.js",
     "test:server-load": "node test/server-load-smoke.test.js",
-    "test": "npm run test:gateway && npm run test:beta-access && npm run test:landingpage-topic && npm run test:profiles && npm run test:topic-fallbacks && npm run test:server-load",
+    "test": "npm run test:gateway && npm run test:beta-access && npm run test:landingpage-topic && npm run test:profiles && npm run test:topic-fallbacks && npm run test:generation-context && npm run test:server-load",
     "test:beta-access": "node test/beta-access.test.js",
     "test:landingpage-topic": "node test/landingpage-topic.test.js",
     "test:profiles": "node test/profiles.test.js",
-    "test:topic-fallbacks": "node test/topic-fallbacks.test.js"
+    "test:topic-fallbacks": "node test/topic-fallbacks.test.js",
+    "test:generation-context": "node test/generation-context.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
