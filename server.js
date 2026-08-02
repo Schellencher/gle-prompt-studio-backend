@@ -65,6 +65,14 @@ const {
   buildLandingpageJsonRepairPrompt,
   renderLandingpageOutput: renderLandingpageOutputV2,
 } = require("./src/landingpage-structured");
+const {
+  QUICK_ACTIONS_VERSION,
+  QuickActionError,
+  validateQuickActionInput,
+  buildQuickActionPrompt,
+  buildQuickActionRepairPrompt,
+  detectUseCaseFlags,
+} = require("./src/quick-actions");
 
 const betaAccess = createBetaAccessControl(process.env);
 
@@ -2193,6 +2201,11 @@ app.get("/api/health", (req, res) => {
       stemsCount: ACTIVE_BANNED_STEMS.length,
       antiFluffVersion: ANTI_FLUFF_VERSION,
     },
+    quickActions: {
+      enabled: true,
+      version: QUICK_ACTIONS_VERSION,
+      actions: ["shorten", "structure", "cta", "headline", "tone"],
+    },
     allowedOrigins: ALLOWED_ORIGINS,
     vercelProjectSlug: VERCEL_PROJECT_SLUG,
   });
@@ -3255,6 +3268,294 @@ app.post("/api/generate", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: "generate_failed",
+      message: e?.message || String(e),
+      requestId: gatewayRequestId,
+    });
+  }
+});
+
+// --------------------
+// Quick Actions — transform current Canvas output
+// --------------------
+app.post("/api/transform", async (req, res) => {
+  const gatewayRequestId = createRequestId();
+  res.setHeader("x-gle-request-id", gatewayRequestId);
+
+  try {
+    const { userId, accountId } = getIds(req);
+    if (!accountId) {
+      return res.status(400).json({ ok: false, error: "missing_account_id" });
+    }
+
+    const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
+
+    const betaEmail = betaAccess.normalizeEmail(
+      acc?.email ||
+        acc?.userEmail ||
+        acc?.accountEmail ||
+        req.user?.email ||
+        "",
+    );
+    if (!betaAccess.isAllowed({ email: betaEmail, accountId, userId })) {
+      return betaAccessDeniedResponse(req, res);
+    }
+
+    const validated = validateQuickActionInput({
+      currentOutput: req.body?.currentOutput,
+      actionType: req.body?.actionType,
+    });
+
+    const useCase = String(req.body?.useCase || "Content").trim();
+    const tone = String(req.body?.tone || "Professionell").trim();
+    const targetTone = String(req.body?.targetTone || tone || "Professionell")
+      .trim()
+      .slice(0, 80);
+    const outLangRaw = String(req.body?.outLang || req.body?.language || "DE")
+      .trim()
+      .toLowerCase();
+    const outLang = outLangRaw.startsWith("en") ? "en" : "de";
+
+    // Quick Actions reuse the same selected Magic Context profile. Invalid
+    // profile IDs fail before quota/model usage, exactly like /api/generate.
+    const activeProfile = resolveGenerationProfile(acc, req.body);
+    const groundingPromptBlock = buildGroundingPromptBlock({
+      profile: activeProfile,
+      useCase,
+      outLang,
+    });
+
+    ensureMonthlyBucket(acc);
+    const byokKey = getApiKey(req);
+    const isPro = planIsPro(acc);
+
+    if (BYOK_ONLY && !byokKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "byok_required",
+        message: "BYOK_ONLY is enabled. Please provide x-gle-api-key.",
+      });
+    }
+
+    let mode = "BYOK";
+    let apiKeyToUse = byokKey;
+    let modelToUse = isPro ? MODEL_PRO : MODEL_BYOK;
+
+    if (!byokKey) {
+      if (isPro && SERVER_AI_CONFIGURED) {
+        mode = "PRO_SERVER";
+        apiKeyToUse = SERVER_OPENAI_KEY;
+        modelToUse = MODEL_PRO;
+      } else if (SERVER_AI_CONFIGURED) {
+        mode = "FREE_SERVER";
+        apiKeyToUse = SERVER_OPENAI_KEY;
+        modelToUse = MODEL_PRO;
+      } else {
+        return res.status(400).json({
+          ok: false,
+          error: "missing_api_key",
+          message:
+            "Kein Server-API-Key verfügbar. Bitte später erneut versuchen oder eigenen OpenAI API-Key eintragen. / No server API key available. Please try again later or add your own OpenAI API key.",
+        });
+      }
+    }
+
+    const engineLabel = byokKey
+      ? ENGINE_BYOK
+      : mode === "PRO_SERVER"
+        ? ENGINE_PRO
+        : ENGINE_TRIAL;
+    res.setHeader("x-gle-engine", engineLabel);
+    res.setHeader("x-gle-model", engineLabel);
+    res.setHeader("x-gle-quick-action", validated.actionType);
+    res.setHeader("x-gle-anti-fluff", ANTI_FLUFF_VERSION);
+
+    const shouldCountUsage = !byokKey;
+    const quota = enforceQuota(acc, false, shouldCountUsage);
+    if (!quota.ok) {
+      return res.status(429).json({
+        ok: false,
+        error: quota.error,
+        message:
+          outLang === "en"
+            ? "Your monthly limit has been reached."
+            : "Dein Monatslimit ist erreicht.",
+        used: Number(acc.usage.used || 0),
+        limit: isPro ? PRO_LIMIT : FREE_LIMIT,
+        renewAt: computeRenewAt(acc),
+      });
+    }
+
+    const gatewayAlias = byokKey
+      ? null
+      : mode === "PRO_SERVER"
+        ? GLE_PRO_ALIAS
+        : GLE_TRIAL_ALIAS;
+    const gatewayExecutions = [];
+    let callIndex = 0;
+
+    async function callTransformModel({ prompt, temperature, stage }) {
+      callIndex += 1;
+      const result = await aiGateway.generate({
+        requestId: gatewayRequestId,
+        stage: stage || `quick_action_${validated.actionType}_${callIndex}`,
+        ...(byokKey
+          ? {
+              provider: "openai",
+              model: modelToUse,
+              apiKeyOverride: apiKeyToUse,
+            }
+          : { alias: gatewayAlias }),
+        prompt,
+        temperature,
+        metadata: {
+          route: "/api/transform",
+          actionType: validated.actionType,
+          mode,
+          useCase: useCase.slice(0, 80),
+          contextProfileId: activeProfile?.id || null,
+          contextProfileVersion: activeProfile
+            ? Number(activeProfile.version || 1)
+            : null,
+          proofFactsCount: activeProfile?.proofFacts?.length || 0,
+        },
+      });
+      gatewayExecutions.push(result.execution);
+      if (gatewayExecutions.length === 1) {
+        res.setHeader("x-gle-provider", result.execution.provider);
+      }
+      return result.output;
+    }
+
+    const prompt = buildQuickActionPrompt({
+      currentOutput: validated.currentOutput,
+      actionType: validated.actionType,
+      useCase,
+      tone,
+      targetTone,
+      outLang,
+      groundingPromptBlock,
+    });
+
+    let output = await callTransformModel({
+      prompt,
+      temperature: activeProfile ? 0.25 : 0.35,
+      stage: `quick_action_${validated.actionType}`,
+    });
+
+    if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
+      for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
+        const hits = findStemViolations(output);
+        if (!hits.length) break;
+
+        const repairPrompt = buildQuickActionRepairPrompt({
+          badOutput: output,
+          sourceOutput: validated.currentOutput,
+          actionType: validated.actionType,
+          useCase,
+          tone,
+          targetTone,
+          outLang,
+          groundingPromptBlock,
+          hits,
+          activeBannedStems: ACTIVE_BANNED_STEMS,
+        });
+
+        output = await callTransformModel({
+          prompt: repairPrompt,
+          temperature: 0.0,
+          stage: `quick_action_bouncer_${i + 1}`,
+        });
+      }
+    }
+
+    output = hardStripHotStems(output);
+    output = String(output || "")
+      .replace(/\u00A0/g, " ")
+      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+      .replace(/\blink\s+in\s+bio\b/gi, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    const flags = detectUseCaseFlags(useCase);
+    const socialStructureInvalid =
+      flags.isSocial && !!activeProfile && !validateSocialPost7(output);
+
+    const guardedResult = applyClaimAwareFactGuard({
+      output,
+      profile: activeProfile,
+      ...flags,
+      outLang,
+      forceSafeRewrite: socialStructureInvalid,
+      forceSafeRewriteReason: "social_structure_invalid",
+    });
+    output = repairEncodingArtifacts(guardedResult.output);
+    const proofResult = guardedResult.proof;
+
+    res.setHeader(
+      "x-gle-proof-status",
+      String(proofResult.status || "NOT_VERIFIED"),
+    );
+    res.setHeader(
+      "x-gle-proof-mode",
+      String(proofResult.mode || "claim-aware-profile-facts-v2"),
+    );
+
+    markUsage(acc, false, shouldCountUsage);
+
+    return res.json({
+      ok: true,
+      output,
+      requestId: gatewayRequestId,
+      transform: {
+        version: QUICK_ACTIONS_VERSION,
+        actionType: validated.actionType,
+        targetTone: validated.actionType === "tone" ? targetTone : null,
+      },
+      grounding: {
+        mode: "light-v1",
+        profileApplied: !!activeProfile,
+        profileId: activeProfile?.id || null,
+        profileVersion: activeProfile ? Number(activeProfile.version || 1) : null,
+        proofFactsCount: activeProfile?.proofFacts?.length || 0,
+      },
+      proof: proofResult,
+      mode,
+      model: engineLabel,
+      plan: isPro ? "PRO" : "FREE",
+      used: acc.usage.used,
+      limit: isPro ? PRO_LIMIT : FREE_LIMIT,
+      boostUsed: acc.usage.boostUsed,
+      boostLimit: PRO_BOOST_LIMIT,
+      renewAt: computeRenewAt(acc),
+      cancelAt: computeCancelAt(acc),
+    });
+  } catch (e) {
+    console.error("transform error:", e);
+
+    if (e instanceof QuickActionError) {
+      return res.status(Number(e.status || 400)).json({
+        ok: false,
+        error: e.code || "quick_action_failed",
+        message: e.message,
+        requestId: gatewayRequestId,
+      });
+    }
+    if (e instanceof ProfileError) {
+      return sendProfileError(res, e);
+    }
+    if (e instanceof GLEGatewayError) {
+      const publicError = toPublicError(e);
+      return res.status(Number(e.status || 500)).json({
+        ...publicError,
+        requestId: gatewayRequestId,
+      });
+    }
+    return res.status(500).json({
+      ok: false,
+      error: "transform_failed",
       message: e?.message || String(e),
       requestId: gatewayRequestId,
     });
