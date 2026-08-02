@@ -92,9 +92,19 @@ function buildGroundingPromptBlock({ profile = null, useCase = "", outLang = "DE
           ? "- Line 6: a neutral engagement question that introduces no new product claim."
           : "- Zeile 6: neutrale Interaktionsfrage ohne neuen Produkt-Claim.",
         isEnglish
+          ? "- Prefer one of these safe question patterns: 'Which point interests you most?' or 'Which detail interests you most?'."
+          : "- Bevorzuge eine dieser sicheren Frageformen: 'Welcher Punkt interessiert Sie am meisten?' oder 'Welches Detail interessiert Sie am meisten?'.",
+        isEnglish
+          ? "- Do not ask how the product fits into, integrates into or supports the reader's activities unless that use case is an Approved profile fact."
+          : "- Frage nicht, wie sich das Produkt in Aktivitäten integrieren lässt oder diese unterstützt, sofern dieser Anwendungsfall kein Approved profile fact ist.",
+        isEnglish
           ? "- Line 7: a neutral non-transactional CTA."
           : "- Zeile 7: neutrale, nicht-transaktionale CTA.",
+        isEnglish
+          ? "- Prefer CTA wording such as 'View details.' or 'Learn more.'; if an approved product name is used, 'View [approved name] details.' is also allowed."
+          : "- Bevorzuge CTA-Formulierungen wie 'Details ansehen.' oder 'Mehr erfahren.'; mit freigegebenem Produktnamen ist auch 'Details zu [freigegebener Name] ansehen.' erlaubt.",
         "- Never use Audience metadata as a Social claim.",
+        "- Do not infer physical attributes such as compact, lightweight, portable or easy to transport unless they are Approved profile facts.",
         "- No unsupported hashtags, use cases, benefits or quality adjectives.",
         "[END_GLE_SOCIAL_GROUNDED_DRAFT_V273]",
       );

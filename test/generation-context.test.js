@@ -88,6 +88,11 @@ assert(socialProfileBlock.includes("Zeile 6: neutrale Interaktionsfrage"));
 assert(socialProfileBlock.includes("weniger als drei unterschiedliche freigegebene Sachfakten"));
 assert(socialProfileBlock.includes("Do not echo command words"));
 assert(socialProfileBlock.includes("silently audit each factual sentence"));
+assert(socialProfileBlock.includes("Bevorzuge eine dieser sicheren Frageformen"));
+assert(socialProfileBlock.includes("Aktivitäten integrieren lässt"));
+assert(socialProfileBlock.includes("Bevorzuge CTA-Formulierungen"));
+assert(socialProfileBlock.includes("compact, lightweight, portable"));
+
 
 const linkedInProfileBlock = buildGroundingPromptBlock({
   profile,

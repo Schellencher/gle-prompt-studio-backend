@@ -1,7 +1,7 @@
 "use strict";
 
 const PROOF_MODE = "claim-aware-profile-facts-v2";
-const MATCHER_VERSION = "smart-v2.7.2-provenance";
+const MATCHER_VERSION = "smart-v2.7.4-language-precision";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -694,16 +694,23 @@ function qualifierTokensAllowed(claimNorm, matchedFacts) {
 }
 
 function isNeutralCta(claimNorm, titleNorm = "") {
-  if (/^(details ansehen|mehr erfahren|mehr details ansehen|view details|learn more|view more details)$/.test(claimNorm)) return true;
+  // Keep CTA allowance exact and contextual. Do not globally whitelist verbs such
+  // as "entdecken" / "erfahren", because those verbs can also appear inside
+  // unsupported benefit or use-case claims.
+  if (/^(details ansehen|mehr erfahren|erfahren sie mehr|mehr details ansehen|view details|learn more|view more details)$/.test(claimNorm)) return true;
   if (/^(jetzt details ansehen|details jetzt ansehen|view details now|learn more now)$/.test(claimNorm)) return true;
   if (!titleNorm) return false;
   return new Set([
     `details zu ${titleNorm} ansehen`,
     `mehr zu ${titleNorm} erfahren`,
+    `mehr ueber ${titleNorm} erfahren`,
+    `erfahren sie mehr ueber ${titleNorm}`,
+    `entdecken sie ${titleNorm}`,
     `jetzt details zu ${titleNorm} ansehen`,
     `view ${titleNorm} details`,
     `view ${titleNorm} details now`,
     `learn more about ${titleNorm}`,
+    `discover ${titleNorm}`,
   ]).has(claimNorm);
 }
 
@@ -750,9 +757,13 @@ function isNeutralEditorialQuestion(text) {
   const q = normalize(text);
   return new Set([
     "welcher punkt interessiert dich am meisten",
+    "welcher punkt interessiert sie am meisten",
     "welches detail interessiert dich am meisten",
+    "welches detail interessiert sie am meisten",
     "welche dieser angaben ist fuer deine entscheidung besonders relevant",
+    "welche dieser angaben ist fuer ihre entscheidung besonders relevant",
     "welches dieser details ist fuer dich am wichtigsten",
+    "welches dieser details ist fuer sie am wichtigsten",
     "which point interests you most",
     "which detail interests you most",
     "which of these details is most relevant to your decision",

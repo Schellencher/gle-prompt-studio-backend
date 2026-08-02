@@ -465,7 +465,7 @@ const smartCombinedResult = applyClaimAwareFactGuard({
   outLang: "DE",
 });
 assert.equal(smartCombinedResult.proof.status, "PASSED");
-assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.2-provenance");
+assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.4-language-precision");
 assert.equal(smartCombinedResult.proof.verifiedFactCount, 4);
 assert.equal(smartCombinedResult.proof.verifiedClaimCount, 1);
 assert.equal(smartCombinedResult.proof.rejectedClaimCount, 0);
@@ -612,5 +612,57 @@ const safeNowCta = applyClaimAwareFactGuard({
   outLang: "DE",
 });
 assert.equal(safeNowCta.proof.status, "PASSED");
+
+
+// v2.7.4 language precision -------------------------------------------------
+const formalNeutralQuestion = auditOutputAgainstFacts(
+  `TrailFold 12
+Welcher Punkt interessiert Sie am meisten?
+USB-C-Anschluss.`,
+  profile,
+);
+assert.equal(formalNeutralQuestion.rejectedClaimCount, 0);
+
+const neutralDiscoverCta = auditOutputAgainstFacts(
+  `TrailFold 12
+USB-C-Anschluss.
+Entdecken Sie TrailFold 12.`,
+  profile,
+);
+assert.equal(neutralDiscoverCta.rejectedClaimCount, 0);
+
+const neutralFormalLearnMoreCta = auditOutputAgainstFacts(
+  `TrailFold 12
+USB-C-Anschluss.
+Erfahren Sie mehr.`,
+  profile,
+);
+assert.equal(neutralFormalLearnMoreCta.rejectedClaimCount, 0);
+
+const activityIntegrationStillBlocked = applyClaimAwareFactGuard({
+  output: `TrailFold 12
+USB-C-Anschluss.
+Wie integrieren Sie TrailFold 12 in Ihre Aktivitäten?`,
+  profile,
+  isSocial: true,
+  outLang: "DE",
+});
+assert.equal(activityIntegrationStillBlocked.proof.status, "SAFE_REWRITE");
+assert(activityIntegrationStillBlocked.proof.rejectedClaims.some(
+  (claim) => claim.reason === "unsupported_claim_language"
+));
+
+const physicalInferenceStillBlocked = applyClaimAwareFactGuard({
+  output: `TrailFold 12
+TrailFold 12 ist kompakt, leicht und einfach zu transportieren.
+USB-C-Anschluss.`,
+  profile,
+  isSocial: true,
+  outLang: "DE",
+});
+assert.equal(physicalInferenceStillBlocked.proof.status, "SAFE_REWRITE");
+assert(physicalInferenceStillBlocked.proof.rejectedClaims.some(
+  (claim) => claim.reason === "unsupported_claim_term"
+));
 
 console.log("GLE Fact Guard v2.7 smart claim matching test passed");

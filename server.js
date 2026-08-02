@@ -2856,7 +2856,7 @@ app.post("/api/generate", async (req, res) => {
     });
     res.setHeader(
       "x-gle-grounded-draft",
-      activeProfile ? "v2.7.3" : "general",
+      activeProfile ? "v2.7.4" : "general",
     );
 
     ensureMonthlyBucket(acc);
@@ -3393,7 +3393,7 @@ app.post("/api/generate", async (req, res) => {
       requestId: gatewayRequestId,
       grounding: {
         mode: "light-v1",
-        draftPolicy: activeProfile ? "grounded-draft-v2.7.3" : "general",
+        draftPolicy: activeProfile ? "grounded-draft-v2.7.4" : "general",
         profileApplied: !!activeProfile,
         profileId: activeProfile?.id || null,
         profileVersion: activeProfile ? Number(activeProfile.version || 1) : null,
