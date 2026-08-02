@@ -412,4 +412,76 @@ assert.equal(socialPassed.proof.status, "PASSED");
 assert.equal(socialPassed.output, safeSocial);
 
 
-console.log("GLE Fact Guard v2.6 native pro output test passed");
+
+// v2.7 Smart Claim Matching --------------------------------------------------
+// Natural factual paraphrases should pass without forcing a SAFE_REWRITE.
+const smartCombined = `TrailFold 12 kombiniert USB-C, warmweißes Licht und eine Akkulaufzeit von bis zu 12 Stunden.`;
+const smartCombinedResult = applyClaimAwareFactGuard({
+  output: smartCombined,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(smartCombinedResult.proof.status, "PASSED");
+assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7");
+assert.equal(smartCombinedResult.proof.verifiedFactCount, 4);
+assert.equal(smartCombinedResult.proof.verifiedClaimCount, 1);
+assert.equal(smartCombinedResult.proof.rejectedClaimCount, 0);
+assert.equal(smartCombinedResult.output, smartCombined);
+
+const smartMultiLine = `TrailFold 12 – Produktdetails
+
+TrailFold 12 ist mit einem USB-C-Anschluss ausgestattet.
+Das Licht ist warmweiß.
+Der Akku hält bis zu 12 Stunden.
+
+Details zu TrailFold 12 ansehen.`;
+const smartMultiLineResult = applyClaimAwareFactGuard({
+  output: smartMultiLine,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(smartMultiLineResult.proof.status, "PASSED");
+assert.equal(smartMultiLineResult.proof.verifiedFactCount, 4);
+assert.equal(smartMultiLineResult.proof.rejectedClaimCount, 0);
+
+// Equivalent bounded wording and common unit abbreviation are accepted.
+const boundedEquivalentAudit = auditOutputAgainstFacts(
+  "Die Akkulaufzeit liegt bei maximal 12 Std.",
+  profile,
+);
+assert.equal(boundedEquivalentAudit.rejectedClaimCount, 0);
+assert.equal(boundedEquivalentAudit.verifiedFactCount, 1);
+
+const smartEnglishAudit = auditOutputAgainstFacts(
+  "TrailFold 12 combines USB-C, warmweiß light and battery life of up to 12 hours.",
+  profile,
+);
+assert.equal(smartEnglishAudit.rejectedClaimCount, 0);
+assert.equal(smartEnglishAudit.verifiedFactCount, 4);
+
+// But dropping an approved qualifier would strengthen the claim and must remain blocked.
+const droppedQualifier = applyClaimAwareFactGuard({
+  output: "TrailFold 12 hat einen USB-C-Anschluss und warmweißes Licht. Die Akkulaufzeit beträgt 12 Stunden.",
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(droppedQualifier.proof.status, "SAFE_REWRITE");
+assert(droppedQualifier.proof.rejectedClaims.some((claim) => claim.reason === "qualification_dropped"));
+const qualifierDropClaim = droppedQualifier.proof.rejectedClaims.find((claim) => claim.reason === "qualification_dropped");
+assert(qualifierDropClaim);
+assert.equal((qualifierDropClaim.qualificationDroppedFactIds || []).length, 1);
+
+// Smart matching must not turn benefit language into an approved fact.
+const smartStillRejectsBenefit = applyClaimAwareFactGuard({
+  output: "TrailFold 12 ist mit USB-C ausgestattet und ermöglicht schnelles Laden. Das Licht ist warmweiß. Der Akku hält bis zu 12 Stunden.",
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(smartStillRejectsBenefit.proof.status, "SAFE_REWRITE");
+assert(smartStillRejectsBenefit.proof.rejectedClaims.some((claim) => claim.reason === "unsupported_claim_term"));
+
+console.log("GLE Fact Guard v2.7 smart claim matching test passed");

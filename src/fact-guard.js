@@ -1,6 +1,7 @@
 "use strict";
 
 const PROOF_MODE = "claim-aware-profile-facts-v2";
+const MATCHER_VERSION = "smart-v2.7";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -517,6 +518,28 @@ const SAFE_GLUE = new Set([
   "wichtigsten", "entscheidend", "matters", "most", "you", "which", "in", "brief", "focus",
 ]);
 
+const SMART_RELATION_GLUE = new Set([
+  // DE: factual linking language only; no benefit/performance adjectives
+  "sowie", "auch", "ausgestattet", "ausstattung", "kombiniert", "kombinieren", "vereint", "vereinen",
+  "setzt", "nutzt", "verwenden", "verwendet", "kommt", "liefert", "haelt", "halten", "betriebszeit",
+  "eckdaten", "daten", "technische", "technischen", "technisch",
+  // EN
+  "also", "equipped", "equipment", "combines", "combine", "uses", "use", "comes", "delivers",
+  "lasts", "technical", "specs", "specifications", "data",
+]);
+
+const FACT_CONTEXT_TOKENS = {
+  connector: new Set(["anschluss", "port", "schnittstelle", "connector"]),
+  lightColor: new Set(["lichtfarbe", "licht", "beleuchtung", "light", "lighting", "color", "colour"]),
+  runtime: new Set(["akkulaufzeit", "laufzeit", "akku", "batterie", "betriebszeit", "runtime", "battery", "life", "hours", "hour", "std", "hr", "hrs"]),
+  capacity: new Set(["fassungsvermoegen", "kapazitaet", "capacity", "volumen", "volume"]),
+  material: new Set(["material", "werkstoff"]),
+  color: new Set(["farbe", "color", "colour"]),
+  price: new Set(["preis", "price"]),
+  weight: new Set(["gewicht", "weight"]),
+  dimensions: new Set(["abmessungen", "masse", "dimensions", "size"]),
+};
+
 const CLAIM_RISK_TOKENS = new Set([
   // DE/normalized
   "schnell", "schnelles", "schneller", "schnelle", "schnellladen", "ladezeit", "laden", "aufladen",
@@ -533,6 +556,15 @@ const CLAIM_RISK_TOKENS = new Set([
   "hiking", "emergency", "household",
 ]);
 
+function isRiskToken(token, corpusTokens) {
+  if (corpusTokens.has(token)) return false;
+  for (const risk of CLAIM_RISK_TOKENS) {
+    if (token === risk) return true;
+    if (risk.length >= 4 && token.length >= 4 && token.startsWith(risk)) return true;
+  }
+  return false;
+}
+
 function factCorpus(facts) {
   return normalize(facts.flatMap((fact) => [fact.label, fact.value]).join(" "));
 }
@@ -541,18 +573,124 @@ function significantTokens(value) {
   return tokens(value).filter((token) => token.length >= 3 || /^\d/.test(token));
 }
 
+function factKind(fact) {
+  const label = normalize(fact?.label);
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return "connector";
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return "lightColor";
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return "runtime";
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return "capacity";
+  if (/^(material|werkstoff)$/.test(label)) return "material";
+  if (/^(farbe|color|colour)$/.test(label)) return "color";
+  if (/^(preis|price)$/.test(label)) return "price";
+  if (/^(gewicht|weight)$/.test(label)) return "weight";
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return "dimensions";
+  return "generic";
+}
+
+function canonicalValueToken(token) {
+  const t = normalize(token);
+  if (["stunde", "stunden", "std", "hour", "hours", "hr", "hrs"].includes(t)) return "__hour__";
+  return t;
+}
+
+function tokensEquivalent(left, right) {
+  const a = canonicalValueToken(left);
+  const b = canonicalValueToken(right);
+  if (a === b) return true;
+  return a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a));
+}
+
+function orderedValueTokensMatch(claimTokens, valueTokens) {
+  if (!valueTokens.length) return false;
+  if (valueTokens.length === 1) return claimTokens.some((token) => tokensEquivalent(token, valueTokens[0]));
+
+  // Keep multi-token values together. This prevents an unrelated number elsewhere
+  // in the sentence (for example a model number) from satisfying a duration value.
+  for (let start = 0; start < claimTokens.length; start += 1) {
+    if (!tokensEquivalent(claimTokens[start], valueTokens[0])) continue;
+    let pos = start;
+    let ok = true;
+    for (let i = 1; i < valueTokens.length; i += 1) {
+      let found = -1;
+      for (let next = pos + 1; next <= Math.min(pos + 2, claimTokens.length - 1); next += 1) {
+        if (tokensEquivalent(claimTokens[next], valueTokens[i])) {
+          found = next;
+          break;
+        }
+      }
+      if (found < 0) {
+        ok = false;
+        break;
+      }
+      pos = found;
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+function valueQualifier(valueNorm) {
+  if (/\b(bis zu|max(?:imal)?|hoechstens|up to|at most|maximum)\b/.test(valueNorm)) return "upper_bound";
+  if (/\b(mindestens|wenigstens|at least|minimum)\b/.test(valueNorm)) return "lower_bound";
+  if (/\b(ca|circa|ungefaehr|etwa|approx(?:imately)?)\b/.test(valueNorm)) return "approx";
+  return "";
+}
+
+function claimPreservesQualifier(claimNorm, qualifier) {
+  if (!qualifier) return true;
+  if (qualifier === "upper_bound") return /\b(bis zu|max(?:imal)?|hoechstens|up to|at most|maximum)\b/.test(claimNorm);
+  if (qualifier === "lower_bound") return /\b(mindestens|wenigstens|at least|minimum)\b/.test(claimNorm);
+  if (qualifier === "approx") return /\b(ca|circa|ungefaehr|etwa|approx(?:imately)?)\b/.test(claimNorm);
+  return true;
+}
+
 function valueMatchesClaim(claimNorm, fact) {
   const valueNorm = normalize(fact?.value);
   if (!valueNorm) return false;
+
+  const qualifier = valueQualifier(valueNorm);
+  if (!claimPreservesQualifier(claimNorm, qualifier)) return false;
+
   if (claimNorm.includes(valueNorm)) return true;
 
-  const vTokens = tokens(fact.value).filter((token) => !SAFE_GLUE.has(token));
+  const claimTokens = tokens(claimNorm);
+  const qualifierWords = new Set([
+    "bis", "zu", "max", "maximal", "hoechstens", "up", "at", "most", "maximum",
+    "mindestens", "wenigstens", "least", "minimum", "ca", "circa", "ungefaehr", "etwa",
+    "approx", "approximately",
+  ]);
+  const vTokens = tokens(fact.value).filter((token) => !SAFE_GLUE.has(token) && !qualifierWords.has(token));
   if (!vTokens.length) return false;
 
-  // For short/numeric values (USB-C, 750 ml, 12 Stunden), all significant value
-  // tokens must occur. This is conservative: paraphrases that cannot be matched
-  // deterministically are sent to review instead of being trusted.
-  return vTokens.every((token) => claimNorm.split(" ").includes(token));
+  return orderedValueTokensMatch(claimTokens, vTokens);
+}
+
+function allowedContextTokensForFacts(facts) {
+  const allowed = new Set();
+  for (const fact of facts) {
+    const kind = factKind(fact);
+    const set = FACT_CONTEXT_TOKENS[kind];
+    if (set) for (const token of set) allowed.add(token);
+  }
+  return allowed;
+}
+
+function qualifierTokensAllowed(claimNorm, matchedFacts) {
+  const allowed = new Set();
+  for (const fact of matchedFacts) {
+    const qualifier = valueQualifier(normalize(fact?.value));
+    if (!claimPreservesQualifier(claimNorm, qualifier)) continue;
+    if (qualifier === "upper_bound") {
+      for (const token of ["bis", "zu", "max", "maximal", "hoechstens", "up", "at", "most", "maximum"]) allowed.add(token);
+    }
+    if (qualifier === "lower_bound") {
+      for (const token of ["mindestens", "wenigstens", "at", "least", "minimum"]) allowed.add(token);
+    }
+    if (qualifier === "approx") {
+      for (const token of ["ca", "circa", "ungefaehr", "etwa", "approx", "approximately"]) allowed.add(token);
+    }
+  }
+  return allowed;
 }
 
 function isNeutralCta(claimNorm, titleNorm = "") {
@@ -644,6 +782,22 @@ function auditClaim(claim, { profile, facts, title }) {
 
   const matchedFacts = facts.filter((fact) => valueMatchesClaim(claimNorm, fact));
   const matchedFactIds = matchedFacts.map((fact) => fact.id);
+  const contextTokens = allowedContextTokensForFacts(matchedFacts);
+  const qualifierTokens = qualifierTokensAllowed(claimNorm, matchedFacts);
+
+  const qualifierDroppedFacts = facts.filter((fact) => {
+    const qualifier = valueQualifier(normalize(fact?.value));
+    if (!qualifier || claimPreservesQualifier(claimNorm, qualifier)) return false;
+
+    const claimTokens = tokens(claimNorm);
+    const qualifierWords = new Set([
+      "bis", "zu", "max", "maximal", "hoechstens", "up", "at", "most", "maximum",
+      "mindestens", "wenigstens", "least", "minimum", "ca", "circa", "ungefaehr", "etwa",
+      "approx", "approximately",
+    ]);
+    const valueTokens = tokens(fact.value).filter((token) => !SAFE_GLUE.has(token) && !qualifierWords.has(token));
+    return valueTokens.length > 0 && orderedValueTokensMatch(claimTokens, valueTokens);
+  });
 
   const claimNumbers = claimNorm.match(/\b\d+(?:[.,]\d+)?\b/g) || [];
   const corpusNumbers = new Set(corpus.match(/\b\d+(?:[.,]\d+)?\b/g) || []);
@@ -657,11 +811,13 @@ function auditClaim(claim, { profile, facts, title }) {
   );
 
   const riskTokens = significantTokens(claimNorm).filter(
-    (token) => CLAIM_RISK_TOKENS.has(token) && !corpusTokens.has(token),
+    (token) => isRiskToken(token, corpusTokens),
   );
 
   const novelTokens = significantTokens(claimNorm).filter((token) => {
     if (corpusTokens.has(token) || SAFE_GLUE.has(token)) return false;
+    if (matchedFacts.length && SMART_RELATION_GLUE.has(token)) return false;
+    if (contextTokens.has(token) || qualifierTokens.has(token)) return false;
     if (/^\d/.test(token)) return false;
     // Do not flag morphology that directly contains/is contained by an approved token.
     for (const approved of corpusTokens) {
@@ -675,7 +831,10 @@ function auditClaim(claim, { profile, facts, title }) {
   let supported = matchedFacts.length > 0;
   let reason = supported ? "matched_approved_fact" : "no_approved_fact_match";
 
-  if (unsupportedTechnicalCodes.length) {
+  if (qualifierDroppedFacts.length) {
+    supported = false;
+    reason = "qualification_dropped";
+  } else if (unsupportedTechnicalCodes.length) {
     supported = false;
     reason = "unsupported_technical_code";
   } else if (unsupportedNumbers.length) {
@@ -696,6 +855,7 @@ function auditClaim(claim, { profile, facts, title }) {
     matchedFactIds,
     unsupportedNumbers,
     unsupportedTechnicalCodes,
+    qualificationDroppedFactIds: qualifierDroppedFacts.map((fact) => fact.id),
     unsupportedTokens: Array.from(new Set([...riskTokens, ...novelTokens])).slice(0, 12),
   };
 }
@@ -726,6 +886,7 @@ function auditOutputAgainstFacts(output, profile) {
 function baseProof(profile, facts) {
   return {
     mode: PROOF_MODE,
+    matcherVersion: MATCHER_VERSION,
     profileId: clean(profile?.id) || null,
     profileVersion: profile ? Number(profile.version || 1) : null,
     factCount: facts.length,
@@ -886,6 +1047,7 @@ function applyClaimAwareFactGuard({
         unsupportedTokens: entry.unsupportedTokens,
         unsupportedNumbers: entry.unsupportedNumbers,
         unsupportedTechnicalCodes: entry.unsupportedTechnicalCodes,
+        qualificationDroppedFactIds: entry.qualificationDroppedFactIds,
       })),
       safeOutputApplied: true,
       safeOutputVerifiedClaimCount: safeAudit.verifiedClaimCount,
@@ -901,6 +1063,7 @@ function applyStrictProfileFactGuard(args = {}) {
 
 module.exports = {
   PROOF_MODE,
+  MATCHER_VERSION,
   approvedFacts,
   buildNaturalFactOutput,
   buildLandingFactOutput,
