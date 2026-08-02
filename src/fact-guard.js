@@ -121,24 +121,23 @@ function buildNaturalFactOutput(profile, { outLang = "DE" } = {}) {
   const facts = approvedFacts(profile);
   if (!facts.length) return "";
 
-  const titleFact = facts.find(isTitleFact) || null;
   const title = pickTitle(profile, facts);
-  const bodyFacts = titleFact ? facts.filter((fact) => fact.id !== titleFact.id) : facts;
+  const { bodyFacts } = bodyFactsFor(profile, facts);
   const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
-  const body = joinPhrases(bodyFacts.map(phraseFn), outLang);
+  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
+  const headline = title || (isEnglish(outLang) ? "Product overview" : "Produkt im Überblick");
+  const lines = [headline, ""];
 
-  const lines = [];
-  if (title) lines.push(title, "");
-
-  if (body) {
-    if (isEnglish(outLang)) {
-      lines.push(`${title || "The product"} offers ${body}.`);
-    } else {
-      lines.push(`${title || "Das Produkt"} bietet ${body}.`);
-    }
+  if (summary) {
+    lines.push(isEnglish(outLang)
+      ? `${title || "The product"} brings the key product details together: ${summary}.`
+      : `Bei ${title || "dem Produkt"} stehen die zentralen Produktangaben im Mittelpunkt: ${summary}.`);
   }
 
-  lines.push("", isEnglish(outLang) ? "View details." : "Details ansehen.");
+  lines.push("", title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -220,45 +219,30 @@ function buildLandingFactOutput(profile, { outLang = "DE" } = {}) {
   const facts = approvedFacts(profile);
   if (!facts.length) return "";
 
-  const titleFact = facts.find(isTitleFact) || null;
   const title = pickTitle(profile, facts);
   const headline = title || (isEnglish(outLang) ? "Product details" : "Produktdetails");
-  const bodyFacts = titleFact ? facts.filter((fact) => fact.id !== titleFact.id) : facts;
-  const summaryFacts = bodyFacts.length ? bodyFacts : facts;
+  const { bodyFacts } = bodyFactsFor(profile, facts);
   const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
   const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
   const faqQuestionFn = isEnglish(outLang) ? enFaqQuestion : deFaqQuestion;
-  const summary = joinPhrases(summaryFacts.map(phraseFn), outLang);
-
+  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
   const lines = [headline, ""];
 
   if (summary) {
-    lines.push(
-      isEnglish(outLang)
-        ? `${title || "The product"} offers ${summary}.`
-        : `${title || "Das Produkt"} bietet ${summary}.`,
-      "",
-    );
+    lines.push(isEnglish(outLang)
+      ? `${capitalizeFirst(summary)} — the key product details at a glance.`
+      : `${capitalizeFirst(summary)} – die zentralen Produktangaben auf einen Blick.`, "");
   }
 
-  lines.push(isEnglish(outLang) ? "At a glance" : "Auf einen Blick");
-  for (const fact of summaryFacts) lines.push(`- ${bulletFn(fact)}`);
+  lines.push(isEnglish(outLang) ? "Product details" : "Produktdetails");
+  for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
 
-  lines.push(
-    "",
-    title
-      ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
-      : (isEnglish(outLang) ? "View details." : "Details ansehen."),
-    "",
-    "FAQ",
-  );
+  lines.push("", title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."), "", "FAQ");
 
-  for (const fact of summaryFacts.slice(0, 3)) {
-    lines.push(
-      faqQuestionFn(fact, title),
-      `${capitalizeFirst(fact.value)}.`,
-      "",
-    );
+  for (const fact of bodyFacts.slice(0, 3)) {
+    lines.push(faqQuestionFn(fact, title), `${capitalizeFirst(fact.value)}.`, "");
   }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -325,18 +309,22 @@ function buildSocialFactOutput(profile, { outLang = "DE" } = {}) {
   const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
   const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
   const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
-  const bullets = cycleFacts(facts, 4);
-  const hook = title
-    ? (isEnglish(outLang) ? `${title} at a glance.` : `${title} auf einen Blick.`)
-    : (isEnglish(outLang) ? "Product facts at a glance." : "Produktangaben auf einen Blick.");
-  const main = summary
-    ? (isEnglish(outLang) ? `${title || "The product"} offers ${summary}.` : `${title || "Das Produkt"} bietet ${summary}.`)
-    : (title ? `${title}.` : factLabelValue(facts[0]));
-  const lines = [hook, main];
+  const bullets = cycleFacts(bodyFacts, 3);
+
+  const lines = [
+    title
+      ? (isEnglish(outLang) ? `${title} at a glance.` : `${title} im Überblick.`)
+      : (isEnglish(outLang) ? "Product details at a glance." : "Produktangaben im Überblick."),
+    summary ? `${capitalizeFirst(summary)}.` : (title ? `${title}.` : factLabelValue(facts[0])),
+  ];
+
   for (const fact of bullets) lines.push(`- ${bulletFn(fact)}`);
+
   lines.push(title
-    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
-    : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+    ? (isEnglish(outLang) ? `More about ${title}:` : `Mehr zu ${title}:`)
+    : (isEnglish(outLang) ? "More details:" : "Mehr Details:"));
+  lines.push(isEnglish(outLang) ? "View details." : "Details ansehen.");
+
   return lines.join("\n").trim();
 }
 
@@ -348,18 +336,27 @@ function buildLinkedInFactOutput(profile, { outLang = "DE" } = {}) {
   const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
   const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
   const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
-  const headline = title
-    ? (isEnglish(outLang) ? `${title} at a glance` : `${title} im Überblick`)
-    : (isEnglish(outLang) ? "Product facts" : "Produktangaben");
-  const lines = [headline, ""];
-  if (summary) lines.push(isEnglish(outLang)
-    ? `${title || "The product"} offers ${summary}.`
-    : `${title || "Das Produkt"} bietet ${summary}.`, "");
-  lines.push(isEnglish(outLang) ? "Facts" : "Fakten");
+
+  const lines = [
+    title
+      ? (isEnglish(outLang) ? `${title} at a glance` : `${title} im Überblick`)
+      : (isEnglish(outLang) ? "Product details" : "Produktangaben"),
+    "",
+    isEnglish(outLang) ? "What are the key product details?" : "Was sind die zentralen Produktangaben?",
+  ];
+
   for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
+
+  if (summary) {
+    lines.push("", isEnglish(outLang)
+      ? `${capitalizeFirst(summary)} — summarized in one place.`
+      : `${capitalizeFirst(summary)} – an einer Stelle zusammengefasst.`);
+  }
+
   lines.push("", title
     ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
     : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -368,25 +365,24 @@ function buildEmailFactOutput(profile, { outLang = "DE" } = {}) {
   if (!facts.length) return "";
   const title = pickTitle(profile, facts);
   const { bodyFacts } = bodyFactsFor(profile, facts);
-  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
   const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
-  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
+
   const lines = [
-    `${isEnglish(outLang) ? "Subject" : "Betreff"}: ${title || (isEnglish(outLang) ? "Product details" : "Produktdetails")}`,
+    `${isEnglish(outLang) ? "Subject" : "Betreff"}: ${title || (isEnglish(outLang) ? "Product details" : "Produktdetails")} – ${isEnglish(outLang) ? "at a glance" : "auf einen Blick"}`,
     "",
     isEnglish(outLang) ? "Hello," : "Hallo,",
     "",
+    title
+      ? (isEnglish(outLang) ? `Here are the key details for ${title}:` : `hier findest du die zentralen Angaben zu ${title}:`)
+      : (isEnglish(outLang) ? "Here are the key product details:" : "hier findest du die zentralen Produktangaben:"),
   ];
-  if (summary) lines.push(isEnglish(outLang)
-    ? `${title || "The product"} offers ${summary}.`
-    : `${title || "Das Produkt"} bietet ${summary}.`, "");
-  lines.push(isEnglish(outLang) ? "At a glance" : "Auf einen Blick");
+
   for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
+
   lines.push("", title
     ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
-    : (isEnglish(outLang) ? "View details." : "Details ansehen."),
-    "",
-    isEnglish(outLang) ? "Best regards" : "Viele Grüße");
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."), "", isEnglish(outLang) ? "Best regards" : "Viele Grüße");
+
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -396,21 +392,32 @@ function buildBlogFactOutput(profile, { outLang = "DE" } = {}) {
   const title = pickTitle(profile, facts);
   const { bodyFacts } = bodyFactsFor(profile, facts);
   const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
-  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const sentenceFn = isEnglish(outLang) ? enFactSentence : deFactSentence;
   const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
-  const lines = [title || (isEnglish(outLang) ? "Product details" : "Produktdetails"), ""];
-  if (summary) lines.push(isEnglish(outLang)
-    ? `${title || "The product"} offers ${summary}.`
-    : `${title || "Das Produkt"} bietet ${summary}.`, "");
-  lines.push(isEnglish(outLang) ? "Product details" : "Produktdetails");
-  for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
-  lines.push("", isEnglish(outLang) ? "Summary" : "Kurz zusammengefasst");
-  if (summary) lines.push(isEnglish(outLang)
-    ? `${title || "The product"}: ${summary}.`
-    : `${title || "Das Produkt"}: ${summary}.`);
+
+  const lines = [
+    title
+      ? (isEnglish(outLang) ? `${title}: product details at a glance` : `${title}: Produktangaben im Überblick`)
+      : (isEnglish(outLang) ? "Product details at a glance" : "Produktangaben im Überblick"),
+    "",
+  ];
+
+  if (summary) {
+    lines.push(isEnglish(outLang)
+      ? `${title || "The product"} brings these product details together: ${summary}.`
+      : `Bei ${title || "dem Produkt"} stehen diese Produktangaben im Mittelpunkt: ${summary}.`, "");
+  }
+
+  lines.push(isEnglish(outLang) ? "In detail" : "Im Detail");
+  lines.push(bodyFacts.map((fact) => sentenceFn(fact, title)).join(" "));
+
+  lines.push("", isEnglish(outLang) ? "In short" : "Kurz zusammengefasst");
+  if (summary) lines.push(`${capitalizeFirst(summary)}.`);
+
   lines.push("", title
     ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
     : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -422,15 +429,23 @@ function buildShortVideoFactOutput(profile, { outLang = "DE" } = {}) {
   const sceneFacts = cycleFacts(bodyFacts, 3);
   const sentenceFn = isEnglish(outLang) ? enFactSentence : deFactSentence;
   const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
-  const lines = [];
+  const lines = ["HOOK"];
+
+  lines.push(`${isEnglish(outLang) ? "Overlay" : "Einblendung"}: ${title || (isEnglish(outLang) ? "Product overview" : "Produkt im Überblick")}`);
+  lines.push(`${isEnglish(outLang) ? "Voiceover" : "Sprecher"}: ${isEnglish(outLang) ? "Three product details at a glance." : "Drei Produktangaben auf einen Blick."}`);
+
   sceneFacts.forEach((fact, index) => {
-    lines.push(`${isEnglish(outLang) ? "Scene" : "Szene"} ${index + 1}: ${bulletFn(fact)}`);
+    lines.push("", `${isEnglish(outLang) ? "SCENE" : "SZENE"} ${index + 1}`);
+    lines.push(`${isEnglish(outLang) ? "Overlay" : "Einblendung"}: ${bulletFn(fact)}`);
     lines.push(`${isEnglish(outLang) ? "Voiceover" : "Sprecher"}: ${sentenceFn(fact, title)}`);
   });
-  lines.push(`${isEnglish(outLang) ? "CTA" : "CTA-Zeile"}: ${title
+
+  lines.push("", "OUTRO");
+  lines.push(`${isEnglish(outLang) ? "Overlay" : "Einblendung"}: ${title
     ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
     : (isEnglish(outLang) ? "View details." : "Details ansehen.")}`);
-  return lines.join("\n").trim();
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // Kept as a compatibility export for tests/tools that still reference the v1 name.
@@ -446,13 +461,16 @@ const SAFE_GLUE = new Set([
   "umfasst", "enthalten", "enthaelt", "betragt", "betraegt", "liegt", "bei", "erreicht",
   "produkt", "modell", "details", "ansehen", "freigegeben", "freigegebene", "angaben", "fakten",
   "blick", "ueberblick", "kurz", "zusammengefasst", "betreff", "hallo", "gruesse", "viele",
-  "produktdetails", "sprecher", "szene", "einblendung", "abschluss",
+  "produktdetails", "produktangaben", "sprecher", "szene", "einblendung", "abschluss", "outro", "hook",
+  "bei", "stehen", "steht", "diese", "drei", "zentral", "zentrale", "zentralen", "wichtig", "wichtigsten",
+  "mittelpunkt", "stelle", "zusammen", "zusammengefasst", "hier", "findest", "du", "mehr", "angaben",
   // EN grammatical glue / neutral verbs
   "the", "a", "an", "and", "or", "with", "of", "to", "up", "for", "in", "on", "as",
   "is", "are", "has", "have", "offers", "offer", "features", "feature", "includes", "include",
   "provides", "provide", "reaches", "details", "view", "approved", "facts", "product", "model",
   "glance", "overview", "summary", "subject", "hello", "regards", "best", "scene", "voiceover",
-  "productdetails", "product",
+  "productdetails", "product", "hook", "outro", "key", "these", "three", "together", "one", "place",
+  "here", "brings", "central",
 ]);
 
 const CLAIM_RISK_TOKENS = new Set([
@@ -521,7 +539,8 @@ function isStructuralLine(value) {
   const line = clean(value)
     .replace(/^\d+[.)]\s*/, "")
     .trim();
-  return /^(bulletpoints|bullet points|mini[- ]?faq|faq|auf einen blick|at a glance|fakten|facts|produktdetails|product details|kurz zusammengefasst|summary|hallo|hello|viele gr(?:ü|ue)ße|best regards)\s*[:,]?$/.test(line.toLowerCase());
+  return /^(bulletpoints|bullet points|mini[- ]?faq|faq|auf einen blick|at a glance|fakten|facts|produktdetails|product details|kurz zusammengefasst|summary|im detail|in detail|in short|hallo|hello|viele gr(?:ü|ue)ße|best regards|hook|outro|abschluss|end|szene\s*\d+|scene\s*\d+)\s*[:,]?$/.test(line.toLowerCase())
+    || /^(drei|three) produkt(?:angaben|details) (auf einen blick|at a glance)\.?$/i.test(line);
 }
 
 function isQuestionLine(value) {
@@ -545,7 +564,7 @@ function splitClaims(output) {
   for (const rawLine of clean(output).split(/\r?\n/)) {
     if (isStructuralLine(rawLine) || isQuestionLine(rawLine)) continue;
     const line = stripClaimPrefix(rawLine);
-    if (!line) continue;
+    if (!line || isStructuralLine(line) || isQuestionLine(line)) continue;
 
     const pieces = line
       .split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ0-9])/)
