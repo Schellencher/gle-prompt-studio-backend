@@ -143,45 +143,122 @@ function buildNaturalFactOutput(profile, { outLang = "DE" } = {}) {
 }
 
 
+function capitalizeFirst(value) {
+  const s = clean(value);
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+function deLandingBullet(fact) {
+  const label = normalize(fact?.label);
+  const value = clean(fact?.value);
+
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return `${value}-Anschluss`;
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return `${capitalizeFirst(value)}es Licht`;
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return `Akkulaufzeit ${value}`;
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return `Fassungsvermögen ${value}`;
+  if (/^(material|werkstoff)$/.test(label)) return `Material: ${value}`;
+  if (/^(farbe|color|colour)$/.test(label)) return `Farbe: ${value}`;
+  if (/^(preis|price)$/.test(label)) return `Preis: ${value}`;
+  if (/^(gewicht|weight)$/.test(label)) return `Gewicht: ${value}`;
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return `Abmessungen: ${value}`;
+
+  return `${clean(fact.label)}: ${value}`;
+}
+
+function enLandingBullet(fact) {
+  const label = normalize(fact?.label);
+  const value = clean(fact?.value);
+
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return `${value} port`;
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return `${capitalizeFirst(value)} light`;
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return `Battery life ${value}`;
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return `Capacity ${value}`;
+  if (/^(material|werkstoff)$/.test(label)) return `Material: ${value}`;
+  if (/^(farbe|color|colour)$/.test(label)) return `Color: ${value}`;
+  if (/^(preis|price)$/.test(label)) return `Price: ${value}`;
+  if (/^(gewicht|weight)$/.test(label)) return `Weight: ${value}`;
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return `Dimensions: ${value}`;
+
+  return `${clean(fact.label)}: ${value}`;
+}
+
+function deFaqQuestion(fact, title) {
+  const label = normalize(fact?.label);
+  const subject = title || "das Produkt";
+
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return `Welchen Anschluss hat ${subject}?`;
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return `Welche Lichtfarbe bietet ${subject}?`;
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return "Wie lange beträgt die Akkulaufzeit?";
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return `Welches Fassungsvermögen hat ${subject}?`;
+  if (/^(material|werkstoff)$/.test(label)) return `Aus welchem Material besteht ${subject}?`;
+  if (/^(farbe|color|colour)$/.test(label)) return `Welche Farbe hat ${subject}?`;
+  if (/^(preis|price)$/.test(label)) return "Wie hoch ist der Preis?";
+  if (/^(gewicht|weight)$/.test(label)) return "Wie hoch ist das Gewicht?";
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return `Welche Abmessungen hat ${subject}?`;
+
+  return `Welche Angabe gilt für ${clean(fact.label)}?`;
+}
+
+function enFaqQuestion(fact, title) {
+  const label = normalize(fact?.label);
+  const subject = title || "the product";
+
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return `Which port does ${subject} use?`;
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return `What light color does ${subject} offer?`;
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return "What is the battery life?";
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return `What capacity does ${subject} have?`;
+  if (/^(material|werkstoff)$/.test(label)) return `What material is ${subject} made from?`;
+  if (/^(farbe|color|colour)$/.test(label)) return `What color is ${subject}?`;
+  if (/^(preis|price)$/.test(label)) return "What is the price?";
+  if (/^(gewicht|weight)$/.test(label)) return "What is the weight?";
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return `What are the dimensions of ${subject}?`;
+
+  return `What is the ${clean(fact.label)}?`;
+}
+
 function buildLandingFactOutput(profile, { outLang = "DE" } = {}) {
   const facts = approvedFacts(profile);
   if (!facts.length) return "";
 
+  const titleFact = facts.find(isTitleFact) || null;
   const title = pickTitle(profile, facts);
-  const headline = title || (isEnglish(outLang) ? "Approved details" : "Freigegebene Angaben");
-  const bodyFacts = facts.filter((fact) => !isTitleFact(fact));
-  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const headline = title || (isEnglish(outLang) ? "Product details" : "Produktdetails");
+  const bodyFacts = titleFact ? facts.filter((fact) => fact.id !== titleFact.id) : facts;
   const summaryFacts = bodyFacts.length ? bodyFacts : facts;
+  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const faqQuestionFn = isEnglish(outLang) ? enFaqQuestion : deFaqQuestion;
   const summary = joinPhrases(summaryFacts.map(phraseFn), outLang);
 
-  const labels = isEnglish(outLang)
-    ? { bullets: "Bullet points", cta: "CTA line", faq: "Mini FAQ", q: "Question", a: "Answer" }
-    : { bullets: "Bulletpoints", cta: "CTA-Zeile", faq: "Mini-FAQ", q: "Frage", a: "Antwort" };
+  const lines = [headline, ""];
 
-  const lines = [
-    `1) ${headline}`,
-    `2) ${title || (isEnglish(outLang) ? "The product" : "Das Produkt")} ${
-      isEnglish(outLang) ? "offers" : "bietet"
-    } ${summary}.`,
-    `3) ${labels.bullets}:`,
-    ...facts.map((fact) => `- ${fact.label}: ${fact.value}`),
-    `4) ${labels.cta}: ${isEnglish(outLang) ? "View details." : "Details ansehen."}`,
-    `5) ${labels.faq}:`,
-  ];
+  if (summary) {
+    lines.push(
+      isEnglish(outLang)
+        ? `${title || "The product"} offers ${summary}.`
+        : `${title || "Das Produkt"} bietet ${summary}.`,
+      "",
+    );
+  }
 
-  const faqFacts = (bodyFacts.length ? bodyFacts : facts).slice(0, 3);
-  for (const fact of faqFacts) {
-    if (isEnglish(outLang)) {
-      lines.push(
-        `- ${labels.q}: What is the approved value for ${fact.label}?`,
-        `  ${labels.a}: ${fact.label}: ${fact.value}.`,
-      );
-    } else {
-      lines.push(
-        `- ${labels.q}: Welche Angabe ist für ${fact.label} freigegeben?`,
-        `  ${labels.a}: ${fact.label}: ${fact.value}.`,
-      );
-    }
+  lines.push(isEnglish(outLang) ? "At a glance" : "Auf einen Blick");
+  for (const fact of summaryFacts) lines.push(`- ${bulletFn(fact)}`);
+
+  lines.push(
+    "",
+    title
+      ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+      : (isEnglish(outLang) ? "View details." : "Details ansehen."),
+    "",
+    "FAQ",
+  );
+
+  for (const fact of summaryFacts.slice(0, 3)) {
+    lines.push(
+      faqQuestionFn(fact, title),
+      `${capitalizeFirst(fact.value)}.`,
+      "",
+    );
   }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -243,8 +320,15 @@ function valueMatchesClaim(claimNorm, fact) {
   return vTokens.every((token) => claimNorm.split(" ").includes(token));
 }
 
-function isNeutralCta(claimNorm) {
-  return /^(details ansehen|mehr erfahren|view details|learn more)$/.test(claimNorm);
+function isNeutralCta(claimNorm, titleNorm = "") {
+  if (/^(details ansehen|mehr erfahren|view details|learn more)$/.test(claimNorm)) return true;
+  if (!titleNorm) return false;
+  return new Set([
+    `details zu ${titleNorm} ansehen`,
+    `mehr zu ${titleNorm} erfahren`,
+    `view ${titleNorm} details`,
+    `learn more about ${titleNorm}`,
+  ]).has(claimNorm);
 }
 
 function technicalCodes(value) {
@@ -264,7 +348,7 @@ function isStructuralLandingLine(value) {
   const line = clean(value)
     .replace(/^\d+[.)]\s*/, "")
     .trim();
-  return /^(bulletpoints|bullet points|mini[- ]?faq)\s*:?$/i.test(line);
+  return /^(bulletpoints|bullet points|mini[- ]?faq|faq|auf einen blick|at a glance)\s*:?$/i.test(line);
 }
 
 function isQuestionLine(value) {
@@ -272,7 +356,7 @@ function isQuestionLine(value) {
     .replace(/^\d+[.)]\s*/, "")
     .replace(/^[-•*]+\s*/, "")
     .trim();
-  return /^(frage|question)\s*:/i.test(line);
+  return /^(frage|question)\s*:/i.test(line) || /\?$/.test(line);
 }
 
 function stripClaimPrefix(value) {
@@ -310,7 +394,7 @@ function auditClaim(claim, { profile, facts, title }) {
   if (!claimNorm) {
     return { text, supported: true, reason: "empty", matchedFactIds: [] };
   }
-  if (claimNorm === titleNorm || isNeutralCta(claimNorm)) {
+  if (claimNorm === titleNorm || isNeutralCta(claimNorm, titleNorm)) {
     const titleFact = facts.find(isTitleFact);
     return {
       text,

@@ -134,14 +134,21 @@ assert.equal(unsupportedUseCase.output, "LinkedIn output");
 
 
 const safeLanding = buildLandingFactOutput(profile, { outLang: "DE" });
-assert(safeLanding.startsWith("1) TrailFold 12"));
-assert(safeLanding.includes("2) TrailFold 12 bietet"));
-assert(safeLanding.includes("3) Bulletpoints:"));
-assert(safeLanding.includes("- Anschluss: USB-C"));
-assert(safeLanding.includes("- Lichtfarbe: warmweiß"));
-assert(safeLanding.includes("- Akkulaufzeit: bis zu 12 Stunden"));
-assert(safeLanding.includes("4) CTA-Zeile: Details ansehen."));
-assert(safeLanding.includes("5) Mini-FAQ:"));
+assert(safeLanding.startsWith("TrailFold 12"));
+assert(safeLanding.includes("TrailFold 12 bietet"));
+assert(safeLanding.includes("Auf einen Blick"));
+assert(safeLanding.includes("- USB-C-Anschluss"));
+assert(safeLanding.includes("- Warmweißes Licht"));
+assert(safeLanding.includes("- Akkulaufzeit bis zu 12 Stunden"));
+assert(safeLanding.includes("Details zu TrailFold 12 ansehen."));
+assert(safeLanding.includes("FAQ"));
+assert(safeLanding.includes("Welchen Anschluss hat TrailFold 12?"));
+assert(safeLanding.includes("Welche Lichtfarbe bietet TrailFold 12?"));
+assert(safeLanding.includes("Wie lange beträgt die Akkulaufzeit?"));
+assert(!safeLanding.includes("CTA-Zeile"));
+assert(!safeLanding.includes("Bulletpoints:"));
+assert(!safeLanding.includes("Mini-FAQ"));
+assert(!safeLanding.toLowerCase().includes("freigegeben"));
 assert(!safeLanding.toLowerCase().includes("schnell"));
 assert(!safeLanding.toLowerCase().includes("robust"));
 
@@ -186,4 +193,4 @@ assert(!landingRewritten.output.toLowerCase().includes("perfekt"));
 assert(!landingRewritten.output.toLowerCase().includes("robust"));
 assert(!landingRewritten.output.toLowerCase().includes("schnellladen"));
 
-console.log("GLE Fact Guard v2 Landingpage extension test passed");
+console.log("GLE Fact Guard v2.2 natural landing safe rewrite test passed");
