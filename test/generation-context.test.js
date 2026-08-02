@@ -77,9 +77,10 @@ const socialProfileBlock = buildGroundingPromptBlock({
   useCase: "Social Media Post",
   outLang: "DE",
 });
-assert(socialProfileBlock.includes("GLE_GROUNDED_DRAFT_RULES_V273"));
-assert(socialProfileBlock.includes("GLE_SOCIAL_GROUNDED_DRAFT_V273"));
+assert(socialProfileBlock.includes("GLE_GROUNDED_DRAFT_RULES_V275"));
+assert(socialProfileBlock.includes("GLE_SOCIAL_GROUNDED_DRAFT_V275"));
 assert(socialProfileBlock.includes("CRITICAL PROOF BOUNDARY"));
+assert(socialProfileBlock.includes("Der Anschluss erfolgt über USB-C"));
 assert(socialProfileBlock.includes("Audience, Voice and Context are editorial metadata"));
 assert(socialProfileBlock.includes("Audience='Outdoor users'"));
 assert(socialProfileBlock.includes("Gib exakt 7 nicht-leere Zeilen aus."));
@@ -99,7 +100,7 @@ const linkedInProfileBlock = buildGroundingPromptBlock({
   useCase: "LinkedIn Post",
   outLang: "DE",
 });
-assert(linkedInProfileBlock.includes("GLE_GROUNDED_DRAFT_RULES_V273"));
-assert(!linkedInProfileBlock.includes("GLE_SOCIAL_GROUNDED_DRAFT_V273"));
+assert(linkedInProfileBlock.includes("GLE_GROUNDED_DRAFT_RULES_V275"));
+assert(!linkedInProfileBlock.includes("GLE_SOCIAL_GROUNDED_DRAFT_V275"));
 
 console.log("GLE generation context test passed");

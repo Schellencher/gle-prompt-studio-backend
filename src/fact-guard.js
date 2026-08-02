@@ -1,7 +1,7 @@
 "use strict";
 
 const PROOF_MODE = "claim-aware-profile-facts-v2";
-const MATCHER_VERSION = "smart-v2.7.4-language-precision";
+const MATCHER_VERSION = "smart-v2.7.5-precision-cleanup";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -693,6 +693,24 @@ function qualifierTokensAllowed(claimNorm, matchedFacts) {
   return allowed;
 }
 
+function contextualRelationTokensForClaim(claimNorm, matchedFacts) {
+  const allowed = new Set();
+  const kinds = new Set(matchedFacts.map(factKind));
+
+  // Keep this deliberately narrow: "erfolgt" is accepted only as grammatical
+  // connector glue in a sentence that explicitly names the connector relation.
+  // It is NOT globally whitelisted for arbitrary matched facts.
+  if (
+    kinds.has("connector") &&
+    /\b(anschluss|port|schnittstelle|connector)\b/.test(claimNorm) &&
+    /\berfolgt\b\s+(?:ueber|per|via|mit)\b/.test(claimNorm)
+  ) {
+    allowed.add("erfolgt");
+  }
+
+  return allowed;
+}
+
 function isNeutralCta(claimNorm, titleNorm = "") {
   // Keep CTA allowance exact and contextual. Do not globally whitelist verbs such
   // as "entdecken" / "erfahren", because those verbs can also appear inside
@@ -926,6 +944,7 @@ function auditClaim(claim, { profile, facts, title }) {
   const matchedFactIds = matchedFacts.map((fact) => fact.id);
   const contextTokens = allowedContextTokensForFacts(matchedFacts);
   const qualifierTokens = qualifierTokensAllowed(claimNorm, matchedFacts);
+  const contextualRelationTokens = contextualRelationTokensForClaim(claimNorm, matchedFacts);
   const contextMismatchKinds = factContextMismatchKinds(text, facts);
 
   const qualifierDroppedFacts = facts.filter((fact) => {
@@ -960,7 +979,7 @@ function auditClaim(claim, { profile, facts, title }) {
   const novelTokens = significantTokens(claimNorm).filter((token) => {
     if (corpusTokens.has(token) || SAFE_GLUE.has(token)) return false;
     if (matchedFacts.length && SMART_RELATION_GLUE.has(token)) return false;
-    if (contextTokens.has(token) || qualifierTokens.has(token)) return false;
+    if (contextTokens.has(token) || qualifierTokens.has(token) || contextualRelationTokens.has(token)) return false;
     if (/^\d/.test(token)) return false;
     // Do not flag morphology that directly contains/is contained by an approved token.
     for (const approved of corpusTokens) {

@@ -465,7 +465,7 @@ const smartCombinedResult = applyClaimAwareFactGuard({
   outLang: "DE",
 });
 assert.equal(smartCombinedResult.proof.status, "PASSED");
-assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.4-language-precision");
+assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.5-precision-cleanup");
 assert.equal(smartCombinedResult.proof.verifiedFactCount, 4);
 assert.equal(smartCombinedResult.proof.verifiedClaimCount, 1);
 assert.equal(smartCombinedResult.proof.rejectedClaimCount, 0);
@@ -664,5 +664,51 @@ assert.equal(physicalInferenceStillBlocked.proof.status, "SAFE_REWRITE");
 assert(physicalInferenceStillBlocked.proof.rejectedClaims.some(
   (claim) => claim.reason === "unsupported_claim_term"
 ));
+
+
+
+// v2.7.5 precision cleanup --------------------------------------------------
+const connectorErfolgtAudit = auditOutputAgainstFacts(
+  `TrailFold 12
+Der Anschluss erfolgt über USB-C.`,
+  profile,
+);
+assert.equal(connectorErfolgtAudit.rejectedClaimCount, 0);
+assert.equal(connectorErfolgtAudit.verifiedFactCount, 2);
+
+// "erfolgt" must not become a global free-pass merely because some fact matched.
+const erfolgtWithoutConnectorContext = applyClaimAwareFactGuard({
+  output: `TrailFold 12
+USB-C erfolgt zuverlässig.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(erfolgtWithoutConnectorContext.proof.status, "SAFE_REWRITE");
+assert(erfolgtWithoutConnectorContext.proof.rejectedClaims.some(
+  (claim) => claim.reason === "unsupported_claim_language" || claim.reason === "unsupported_claim_term"
+));
+
+const innovationStillBlocked = applyClaimAwareFactGuard({
+  output: `TrailFold 12
+Ein innovatives Produkt mit USB-C-Anschluss.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(innovationStillBlocked.proof.status, "SAFE_REWRITE");
+assert(innovationStillBlocked.proof.rejectedClaims.some(
+  (claim) => (claim.unsupportedTokens || []).includes("innovatives")
+));
+
+const versatileUseCasesStillBlocked = applyClaimAwareFactGuard({
+  output: `TrailFold 12
+Vielseitige Einsatzmöglichkeiten mit USB-C.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(versatileUseCasesStillBlocked.proof.status, "SAFE_REWRITE");
+assert(versatileUseCasesStillBlocked.proof.rejectedClaimCount >= 1);
 
 console.log("GLE Fact Guard v2.7 smart claim matching test passed");

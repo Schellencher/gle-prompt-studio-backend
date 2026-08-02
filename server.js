@@ -118,13 +118,13 @@ const MODEL_BOOST = String(process.env.MODEL_BOOST || "gpt-4o").trim();
 
 // Public engine labels (shown in UI)
 const ENGINE_BYOK = String(
-  process.env.ENGINE_BYOK || "GLE Core v2.4 (BYOK)",
+  process.env.ENGINE_BYOK || "GLE Core (BYOK)",
 ).trim();
 const ENGINE_PRO = String(
-  process.env.ENGINE_PRO || "GLE Core v2.4 (Active)",
+  process.env.ENGINE_PRO || "GLE Core (Active)",
 ).trim();
 const ENGINE_TRIAL = String(
-  process.env.ENGINE_TRIAL || "GLE Core v2.4 (Trial)",
+  process.env.ENGINE_TRIAL || "GLE Core (Trial)",
 ).trim();
 const ENGINE_ULTRA = String(
   process.env.ENGINE_ULTRA || "High-Density Engine (Ultra)",
@@ -2856,7 +2856,7 @@ app.post("/api/generate", async (req, res) => {
     });
     res.setHeader(
       "x-gle-grounded-draft",
-      activeProfile ? "v2.7.4" : "general",
+      activeProfile ? "v2.7.5" : "general",
     );
 
     ensureMonthlyBucket(acc);
@@ -3393,7 +3393,7 @@ app.post("/api/generate", async (req, res) => {
       requestId: gatewayRequestId,
       grounding: {
         mode: "light-v1",
-        draftPolicy: activeProfile ? "grounded-draft-v2.7.4" : "general",
+        draftPolicy: activeProfile ? "grounded-draft-v2.7.5" : "general",
         profileApplied: !!activeProfile,
         profileId: activeProfile?.id || null,
         profileVersion: activeProfile ? Number(activeProfile.version || 1) : null,

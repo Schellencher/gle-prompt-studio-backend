@@ -45,7 +45,7 @@ function buildGroundingPromptBlock({ profile = null, useCase = "", outLang = "DE
 
   if (profile) {
     parts.push(
-      "[GLE_GROUNDED_DRAFT_RULES_V273]",
+      "[GLE_GROUNDED_DRAFT_RULES_V275]",
       "- The selected Magic Context profile follows below.",
       "- CRITICAL PROOF BOUNDARY: only entries listed under 'Approved profile facts' may be asserted as factual claims about the product, company or project.",
       "- Brand/Client, Audience, Voice and Context are editorial metadata. They may guide naming, tone or intended readership, but they are NOT approved factual claims.",
@@ -53,6 +53,7 @@ function buildGroundingPromptBlock({ profile = null, useCase = "", outLang = "DE
       "- Do not turn Voice or Context metadata into a product feature, benefit, performance or quality claim.",
       "- Do not contradict approved profile facts. Do not infer additional profile-specific facts beyond the Approved profile facts.",
       "- Natural wording is allowed, but every factual product/company/project claim must be directly supported by one or more Approved profile facts.",
+      "- Neutral grammatical relation wording is allowed only when it preserves the approved fact relation; for example, if Anschluss=USB-C is approved, 'Der Anschluss erfolgt über USB-C.' is acceptable, but do not generalize this wording into a new capability or benefit.",
       "- Approved profile facts are a source pool, not a checklist. Use only the facts relevant to the requested format; do not force every approved fact into every output.",
       "- Do not add benefits, suitability, performance, quality adjectives, use cases, causal effects or implications unless they are explicitly Approved profile facts.",
       "- Avoid unsupported marketing adjectives such as perfect, ideal, robust, premium, versatile, fast, convenient or similar claims unless explicitly approved.",
@@ -72,7 +73,7 @@ function buildGroundingPromptBlock({ profile = null, useCase = "", outLang = "DE
     if (isSocial) {
       const isEnglish = String(outLang || "").toLowerCase() === "en";
       parts.push(
-        "[GLE_SOCIAL_GROUNDED_DRAFT_V273]",
+        "[GLE_SOCIAL_GROUNDED_DRAFT_V275]",
         isEnglish
           ? "- Output exactly 7 non-empty lines."
           : "- Gib exakt 7 nicht-leere Zeilen aus.",
@@ -106,13 +107,13 @@ function buildGroundingPromptBlock({ profile = null, useCase = "", outLang = "DE
         "- Never use Audience metadata as a Social claim.",
         "- Do not infer physical attributes such as compact, lightweight, portable or easy to transport unless they are Approved profile facts.",
         "- No unsupported hashtags, use cases, benefits or quality adjectives.",
-        "[END_GLE_SOCIAL_GROUNDED_DRAFT_V273]",
+        "[END_GLE_SOCIAL_GROUNDED_DRAFT_V275]",
       );
     }
 
     parts.push(
       buildProfilePromptBlock(profile),
-      "[END_GLE_GROUNDED_DRAFT_RULES_V273]",
+      "[END_GLE_GROUNDED_DRAFT_RULES_V275]",
     );
   }
 
