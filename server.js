@@ -960,7 +960,7 @@ HARTE REGELN:
 - Wenn im Format bereits "CTA-Zeile" verlangt wird, dann KEINE zusÃ¤tzliche CTA am Ende anhÃ¤ngen.
 - CTA neutral halten, z.B. "Mehr erfahren.", "Details ansehen.", "Kontakt aufnehmen."
 - FAQ sauber schreiben: Frage und Antwort jeweils vollstÃ¤ndig, keine halben Zeilen.
-- Schreibe konkret: was + fÃ¼r wen + Ergebnis, in einfachen Worten.
+- Schreibe konkret und in einfachen Worten. Nenne Zielgruppe, Nutzen oder Ergebnis nur, wenn diese Angaben vom Nutzer oder in freigegebenen Fakten belegt sind.
 - Ausgabe: nur der finale Content.
 
 QUALITÃ„TSREGELN:
@@ -1000,41 +1000,50 @@ function buildRepairPrompt({
   const hitList = Array.isArray(hits) && hits.length ? hits.join(", ") : "";
 
   // Social Media Post = strict 7 lines
-  if (String(useCase || "").trim() === "Social Media Post") {
+  const repairUseCaseNorm = String(useCase || "").trim().toLowerCase();
+  if (
+    (repairUseCaseNorm.includes("social") && repairUseCaseNorm.includes("post")) ||
+    repairUseCaseNorm === "social media post"
+  ) {
     return `
-You are a strict formatter AND copy editor.
+You are a strict formatter AND grounded copy editor.
 
 Rewrite the text below completely new if needed.
 Remove banned word stems.
-Keep meaning.
-DO NOT reuse phrases directly.
+Keep only meaning that is supported by THEMA / REQUIREMENTS / approved profile facts.
+DO NOT reuse unsafe phrases directly.
 
 LANGUAGE: ${lang}
 TONE: ${tone}
 
+THEMA:
+${topic}
+
+REQUIREMENTS / GROUNDING:
+${extra || "(none)"}
+
 BANNED STEMS (must NOT appear):
 ${bannedAll || "(none)"}
 
-REQUIRED STRUCTURE (EXACTLY 7 LINES):
-Line 1: Hook sentence (no title).
-Line 2: Short main text sentence (exactly one sentence, no bullet).
-Line 3: - Bullet point 1
-Line 4: - Bullet point 2
-Line 5: - Bullet point 3
-Line 6: - Bullet point 4
-Line 7: Specific CTA sentence with a clear action (comment/reply/click/write).
+REQUIRED STRUCTURE (EXACTLY 7 NON-EMPTY LINES):
+Line 1: Neutral hook. No unsupported benefit, suitability, use-case or hype claim.
+Line 2: One factual main-text sentence supported by the supplied facts.
+Line 3: - Bullet point 1 using only a supplied/approved fact.
+Line 4: - Bullet point 2 using only a supplied/approved fact.
+Line 5: - Bullet point 3 using only a supplied/approved fact.
+Line 6: Neutral engagement question that introduces no new factual claim.
+Line 7: Neutral non-transactional CTA.
 
-STRICT RULES:
-- NO titles
-- NO markdown
-- NO bold (**)
-- NO generic CTA
-- DO NOT add lines
-- DO NOT merge lines
-- Output ONLY the 7 lines
-- If impossible: output FORMAT_ERROR
+GROUNDING RULES:
+- If a Magic Context profile is present, only entries explicitly listed as Approved profile facts may become product/company/project factual claims.
+- Audience, Voice and Context metadata are editorial guidance, not product facts.
+- Never turn an audience such as "Outdoor users" into "outdoor product", "for camping", "ideal for outdoor use" or a similar suitability claim unless that wording is an Approved profile fact.
+- Do not mix an approved fact with an unsupported adjective or benefit in the same sentence.
+- If information is missing, omit the claim. Do not invent it.
+- No unsupported hashtags.
+- Output only the final 7 lines.
 
-Previous output (do NOT reuse directly):
+Previous output (do NOT reuse unsafe wording):
 """
 ${String(badOutput || "").slice(0, 2000)}
 """
@@ -1696,10 +1705,12 @@ function validateSocialPost7(output) {
   if (!lines[0] || /^[-•]/.test(lines[0])) return false;
   if (!lines[1] || /^[-•]/.test(lines[1])) return false;
 
-  for (let i = 2; i <= 5; i += 1) {
+  for (let i = 2; i <= 4; i += 1) {
     if (!/^[-•]\s+\S/.test(lines[i])) return false;
   }
 
+  // Line 6 is the native engagement-question slot; line 7 is the CTA.
+  if (!lines[5] || /^[-•]/.test(lines[5]) || !/\?\s*$/.test(lines[5])) return false;
   if (!lines[6] || /^[-•]/.test(lines[6])) return false;
   return true;
 }
@@ -2840,7 +2851,13 @@ app.post("/api/generate", async (req, res) => {
     const activeProfile = resolveGenerationProfile(acc, req.body);
     const groundingPromptBlock = buildGroundingPromptBlock({
       profile: activeProfile,
+      useCase,
+      outLang,
     });
+    res.setHeader(
+      "x-gle-grounded-draft",
+      activeProfile ? "v2.7.3" : "general",
+    );
 
     ensureMonthlyBucket(acc);
 
@@ -3035,16 +3052,19 @@ app.post("/api/generate", async (req, res) => {
           useCase: String(useCase || "").trim(),
           tone,
           topic,
-          extra: `${extra || ""}\n\n${groundingPromptBlock}`.trim(),
+          extra,
           outLang,
         });
 
+    // Attach grounding exactly once. Duplicating the same block inside FORMAT
+    // and again after the master prompt made the instruction hierarchy noisy.
     masterPrompt = `${masterPrompt}\n\n${groundingPromptBlock}`.trim();
 
     // 1) First pass
     let output = await callStudioModel({
       prompt: masterPrompt,
-      temperature: isLandingPage ? 0.35 : 0.6,
+      // Profiled drafts trade a little creativity for much stronger factual discipline.
+      temperature: isLandingPage ? 0.3 : activeProfile ? 0.35 : 0.6,
       stage: "generate",
     });
 
@@ -3054,11 +3074,11 @@ app.post("/api/generate", async (req, res) => {
 
       // Wenn das Modell kein gÃ¼ltiges JSON liefert: einmal hart als JSON reparieren
       if (!parsed) {
-        const jsonRepairPrompt = buildLandingpageJsonRepairPrompt({
+        const jsonRepairPrompt = `${buildLandingpageJsonRepairPrompt({
           badOutput: output,
           topic,
           outLang,
-        });
+        })}\n\n${groundingPromptBlock}`.trim();
 
         const repairedJsonText = await callStudioModel({
           prompt: jsonRepairPrompt,
@@ -3123,7 +3143,7 @@ app.post("/api/generate", async (req, res) => {
           useCase,
           tone,
           topic,
-          extra,
+          extra: `${extra || ""}\n\n${groundingPromptBlock}`.trim(),
           outLang,
         });
 
@@ -3373,6 +3393,7 @@ app.post("/api/generate", async (req, res) => {
       requestId: gatewayRequestId,
       grounding: {
         mode: "light-v1",
+        draftPolicy: activeProfile ? "grounded-draft-v2.7.3" : "general",
         profileApplied: !!activeProfile,
         profileId: activeProfile?.id || null,
         profileVersion: activeProfile ? Number(activeProfile.version || 1) : null,

@@ -70,4 +70,31 @@ assert(profileBlock.includes("source pool, not a checklist"));
 assert(profileBlock.includes("Neutral headings, engagement questions"));
 assert(profileBlock.includes("hashtag may only repeat an approved name or approved fact value"));
 
+
+
+const socialProfileBlock = buildGroundingPromptBlock({
+  profile,
+  useCase: "Social Media Post",
+  outLang: "DE",
+});
+assert(socialProfileBlock.includes("GLE_GROUNDED_DRAFT_RULES_V273"));
+assert(socialProfileBlock.includes("GLE_SOCIAL_GROUNDED_DRAFT_V273"));
+assert(socialProfileBlock.includes("CRITICAL PROOF BOUNDARY"));
+assert(socialProfileBlock.includes("Audience, Voice and Context are editorial metadata"));
+assert(socialProfileBlock.includes("Audience='Outdoor users'"));
+assert(socialProfileBlock.includes("Gib exakt 7 nicht-leere Zeilen aus."));
+assert(socialProfileBlock.includes("Zeilen 3-5: exakt drei Bullet-Zeilen"));
+assert(socialProfileBlock.includes("Zeile 6: neutrale Interaktionsfrage"));
+assert(socialProfileBlock.includes("weniger als drei unterschiedliche freigegebene Sachfakten"));
+assert(socialProfileBlock.includes("Do not echo command words"));
+assert(socialProfileBlock.includes("silently audit each factual sentence"));
+
+const linkedInProfileBlock = buildGroundingPromptBlock({
+  profile,
+  useCase: "LinkedIn Post",
+  outLang: "DE",
+});
+assert(linkedInProfileBlock.includes("GLE_GROUNDED_DRAFT_RULES_V273"));
+assert(!linkedInProfileBlock.includes("GLE_SOCIAL_GROUNDED_DRAFT_V273"));
+
 console.log("GLE generation context test passed");

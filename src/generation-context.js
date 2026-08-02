@@ -31,7 +31,7 @@ function resolveGenerationProfile(account, body) {
   return profile;
 }
 
-function buildGroundingPromptBlock({ profile = null } = {}) {
+function buildGroundingPromptBlock({ profile = null, useCase = "", outLang = "DE" } = {}) {
   const parts = [
     "[GLE_GROUNDING_RULES_V2]",
     "Grounding rules for the final content:",
@@ -45,15 +45,64 @@ function buildGroundingPromptBlock({ profile = null } = {}) {
 
   if (profile) {
     parts.push(
-      "- A selected Magic Context profile follows below. Its approved profile facts may be used as user-approved context, but they are not independently verified world truth.",
-      "- Do not contradict approved profile facts. Do not infer additional profile-specific facts beyond what the profile says.",
-      "- Natural wording is allowed, but every factual product/company/project claim must be directly supported by approved profile facts.",
+      "[GLE_GROUNDED_DRAFT_RULES_V273]",
+      "- The selected Magic Context profile follows below.",
+      "- CRITICAL PROOF BOUNDARY: only entries listed under 'Approved profile facts' may be asserted as factual claims about the product, company or project.",
+      "- Brand/Client, Audience, Voice and Context are editorial metadata. They may guide naming, tone or intended readership, but they are NOT approved factual claims.",
+      "- Never turn Audience metadata into a product suitability/use-case claim. Example: Audience='Outdoor users' does NOT mean the product is 'for outdoor use', 'ideal for camping' or an 'outdoor product' unless that statement is also an Approved profile fact.",
+      "- Do not turn Voice or Context metadata into a product feature, benefit, performance or quality claim.",
+      "- Do not contradict approved profile facts. Do not infer additional profile-specific facts beyond the Approved profile facts.",
+      "- Natural wording is allowed, but every factual product/company/project claim must be directly supported by one or more Approved profile facts.",
       "- Approved profile facts are a source pool, not a checklist. Use only the facts relevant to the requested format; do not force every approved fact into every output.",
-      "- Do not add benefits, suitability, performance, quality adjectives, use cases, causal effects or implications unless they are explicitly approved facts.",
+      "- Do not add benefits, suitability, performance, quality adjectives, use cases, causal effects or implications unless they are explicitly Approved profile facts.",
+      "- Avoid unsupported marketing adjectives such as perfect, ideal, robust, premium, versatile, fast, convenient or similar claims unless explicitly approved.",
+      "- A sentence that mixes an approved fact with an unsupported claim is still unsafe. Remove the unsupported part instead of keeping the whole sentence.",
       "- Neutral headings, engagement questions and non-transactional CTAs are allowed only when they add no new product/company/project claim.",
       "- Do not add hashtags that imply unapproved benefits or use cases. A hashtag may only repeat an approved name or approved fact value.",
+      "- Do not echo command words from THEMA / FORMAT (for example 'create', 'short', 'post') as factual content.",
+      "- Before finalizing, silently audit each factual sentence against the Approved profile facts. If a factual assertion is not directly supported, delete it rather than guessing or softening it.",
       "- Prefer concise natural wording over explanatory filler.",
+    );
+
+    const useCaseNorm = String(useCase || "").trim().toLowerCase();
+    const isSocial =
+      (useCaseNorm.includes("social") && useCaseNorm.includes("post")) ||
+      useCaseNorm === "social media post";
+
+    if (isSocial) {
+      const isEnglish = String(outLang || "").toLowerCase() === "en";
+      parts.push(
+        "[GLE_SOCIAL_GROUNDED_DRAFT_V273]",
+        isEnglish
+          ? "- Output exactly 7 non-empty lines."
+          : "- Gib exakt 7 nicht-leere Zeilen aus.",
+        isEnglish
+          ? "- Line 1: a neutral hook using only the approved product/name context; no benefit, suitability or hype claim."
+          : "- Zeile 1: neutraler Hook nur auf Basis freigegebener Produkt-/Namensangaben; kein Nutzen-, Eignungs- oder Hype-Claim.",
+        isEnglish
+          ? "- Line 2: one factual sentence supported only by Approved profile facts."
+          : "- Zeile 2: genau ein sachlicher Satz, ausschließlich durch Approved profile facts gedeckt.",
+        isEnglish
+          ? "- Lines 3-5: exactly three bullet lines, each repeating an Approved profile fact without adding interpretation."
+          : "- Zeilen 3-5: exakt drei Bullet-Zeilen, jeweils ein Approved profile fact ohne zusätzliche Interpretation.",
+        isEnglish
+          ? "- If fewer than three distinct approved body facts exist, reuse only approved information rather than inventing a new fact."
+          : "- Wenn weniger als drei unterschiedliche freigegebene Sachfakten vorhanden sind, verwende nur freigegebene Angaben erneut statt einen neuen Fakt zu erfinden.",
+        isEnglish
+          ? "- Line 6: a neutral engagement question that introduces no new product claim."
+          : "- Zeile 6: neutrale Interaktionsfrage ohne neuen Produkt-Claim.",
+        isEnglish
+          ? "- Line 7: a neutral non-transactional CTA."
+          : "- Zeile 7: neutrale, nicht-transaktionale CTA.",
+        "- Never use Audience metadata as a Social claim.",
+        "- No unsupported hashtags, use cases, benefits or quality adjectives.",
+        "[END_GLE_SOCIAL_GROUNDED_DRAFT_V273]",
+      );
+    }
+
+    parts.push(
       buildProfilePromptBlock(profile),
+      "[END_GLE_GROUNDED_DRAFT_RULES_V273]",
     );
   }
 
