@@ -1,7 +1,7 @@
 "use strict";
 
 const PROOF_MODE = "claim-aware-profile-facts-v2";
-const MATCHER_VERSION = "smart-v2.7";
+const MATCHER_VERSION = "smart-v2.7.1-integrity";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -694,14 +694,126 @@ function qualifierTokensAllowed(claimNorm, matchedFacts) {
 }
 
 function isNeutralCta(claimNorm, titleNorm = "") {
-  if (/^(details ansehen|mehr erfahren|view details|learn more)$/.test(claimNorm)) return true;
+  if (/^(details ansehen|mehr erfahren|mehr details ansehen|view details|learn more|view more details)$/.test(claimNorm)) return true;
+  if (/^(jetzt details ansehen|details jetzt ansehen|view details now|learn more now)$/.test(claimNorm)) return true;
   if (!titleNorm) return false;
   return new Set([
     `details zu ${titleNorm} ansehen`,
     `mehr zu ${titleNorm} erfahren`,
+    `jetzt details zu ${titleNorm} ansehen`,
     `view ${titleNorm} details`,
+    `view ${titleNorm} details now`,
     `learn more about ${titleNorm}`,
   ]).has(claimNorm);
+}
+
+function explicitFactKinds(value) {
+  const norm = normalize(value);
+  const kinds = new Set();
+
+  if (/\b(anschluss|port|schnittstelle|connector)\b/.test(norm)) kinds.add("connector");
+  if (/\b(lichtfarbe|licht farbe|light color|light colour|beleuchtung|lighting)\b/.test(norm)) kinds.add("lightColor");
+  if (/\b(akkulaufzeit|laufzeit|betriebszeit|runtime|battery life|akku|batterie|battery)\b/.test(norm)) kinds.add("runtime");
+  if (/\b(fassungsvermoegen|kapazitaet|capacity|volumen|volume)\b/.test(norm)) kinds.add("capacity");
+  if (/\b(material|werkstoff)\b/.test(norm)) kinds.add("material");
+  if (/\b(preis|price)\b/.test(norm)) kinds.add("price");
+  if (/\b(gewicht|weight)\b/.test(norm)) kinds.add("weight");
+  if (/\b(abmessungen|masse|dimensions|size)\b/.test(norm)) kinds.add("dimensions");
+  if (!kinds.has("lightColor") && /\b(farbe|color|colour)\b/.test(norm)) kinds.add("color");
+
+  return kinds;
+}
+
+function claimChunks(claimNorm) {
+  return clean(claimNorm)
+    .split(/\s*(?:,|;|\bund\b|\bsowie\b|\band\b|&)\s*/i)
+    .map((part) => normalize(part))
+    .filter(Boolean);
+}
+
+function factContextMismatchKinds(claimNorm, facts) {
+  const mismatches = new Set();
+  for (const chunk of claimChunks(claimNorm)) {
+    const kinds = explicitFactKinds(chunk);
+    for (const kind of kinds) {
+      const candidates = facts.filter((fact) => factKind(fact) === kind);
+      if (!candidates.length || !candidates.some((fact) => valueMatchesClaim(chunk, fact))) {
+        mismatches.add(kind);
+      }
+    }
+  }
+  return Array.from(mismatches);
+}
+
+function isNeutralEditorialQuestion(text) {
+  if (!/\?\s*$/.test(clean(text))) return false;
+  const q = normalize(text);
+  return new Set([
+    "welcher punkt interessiert dich am meisten",
+    "welches detail interessiert dich am meisten",
+    "welche dieser angaben ist fuer deine entscheidung besonders relevant",
+    "welches dieser details ist fuer dich am wichtigsten",
+    "which point interests you most",
+    "which detail interests you most",
+    "which of these details is most relevant to your decision",
+  ]).has(q);
+}
+
+function isApprovedFactQuestion(text, facts, title) {
+  if (!/\?\s*$/.test(clean(text))) return false;
+  const q = normalize(text);
+  for (const fact of facts) {
+    if (isTitleFact(fact)) continue;
+    const expected = [
+      deFaqQuestion(fact, title),
+      enFaqQuestion(fact, title),
+    ].map(normalize);
+    if (expected.includes(q)) return true;
+  }
+
+  // Also allow neutral questions about an approved fact category, but never
+  // let a question smuggle in a new number, technical code or risky benefit.
+  const kinds = explicitFactKinds(q);
+  if (!kinds.size) return false;
+  const availableKinds = new Set(facts.map(factKind));
+  if (Array.from(kinds).some((kind) => !availableKinds.has(kind))) return false;
+
+  const corpus = factCorpus(facts);
+  const corpusTokens = new Set(tokens(corpus));
+  if (significantTokens(q).some((token) => isRiskToken(token, corpusTokens))) return false;
+
+  const claimNumbers = q.match(/\b\d+(?:[.,]\d+)?\b/g) || [];
+  const corpusNumbers = new Set(corpus.match(/\b\d+(?:[.,]\d+)?\b/g) || []);
+  if (claimNumbers.some((number) => !corpusNumbers.has(number))) return false;
+
+  const approvedTechnicalCodes = new Set(
+    facts.flatMap((fact) => technicalCodes(`${fact.label} ${fact.value}`)),
+  );
+  if (technicalCodes(text).some((code) => !approvedTechnicalCodes.has(code))) return false;
+
+  return true;
+}
+
+function approvedHashtagFacts(text, facts) {
+  const rawTags = clean(text).match(/#[\p{L}\p{N}_-]+/gu) || [];
+  if (!rawTags.length) return null;
+
+  const withoutTags = clean(text).replace(/#[\p{L}\p{N}_-]+/gu, "").trim();
+  if (withoutTags) return null;
+
+  const matches = [];
+  const approvedCompacts = facts.map((fact) => ({
+    id: fact.id,
+    compact: normalize(fact.value).replace(/\s+/g, ""),
+  }));
+
+  for (const tag of rawTags) {
+    const compact = normalize(tag.slice(1)).replace(/\s+/g, "");
+    const match = approvedCompacts.find((entry) => entry.compact === compact);
+    if (!match) return null;
+    matches.push(match.id);
+  }
+  return Array.from(new Set(matches));
 }
 
 function technicalCodes(value) {
@@ -746,13 +858,13 @@ function stripClaimPrefix(value) {
 function splitClaims(output) {
   const out = [];
   for (const rawLine of clean(output).split(/\r?\n/)) {
-    if (isStructuralLine(rawLine) || isQuestionLine(rawLine)) continue;
+    if (isStructuralLine(rawLine)) continue;
     const line = stripClaimPrefix(rawLine);
-    if (!line || isStructuralLine(line) || isQuestionLine(line)) continue;
+    if (!line || isStructuralLine(line)) continue;
 
     const pieces = line
       .split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ0-9])/)
-      .map((part) => clean(part).replace(/[.!?]+$/, ""))
+      .map((part) => clean(part).replace(/[.!]+$/, ""))
       .filter(Boolean);
 
     out.push(...(pieces.length ? pieces : [line]));
@@ -780,10 +892,30 @@ function auditClaim(claim, { profile, facts, title }) {
     };
   }
 
+  if (isNeutralEditorialQuestion(text) || isApprovedFactQuestion(text, facts, title)) {
+    return {
+      text,
+      supported: true,
+      reason: isNeutralEditorialQuestion(text) ? "neutral_question" : "approved_fact_question",
+      matchedFactIds: [],
+    };
+  }
+
+  const hashtagFactIds = approvedHashtagFacts(text, facts);
+  if (hashtagFactIds) {
+    return {
+      text,
+      supported: true,
+      reason: "approved_fact_tags",
+      matchedFactIds: hashtagFactIds,
+    };
+  }
+
   const matchedFacts = facts.filter((fact) => valueMatchesClaim(claimNorm, fact));
   const matchedFactIds = matchedFacts.map((fact) => fact.id);
   const contextTokens = allowedContextTokensForFacts(matchedFacts);
   const qualifierTokens = qualifierTokensAllowed(claimNorm, matchedFacts);
+  const contextMismatchKinds = factContextMismatchKinds(text, facts);
 
   const qualifierDroppedFacts = facts.filter((fact) => {
     const qualifier = valueQualifier(normalize(fact?.value));
@@ -843,6 +975,9 @@ function auditClaim(claim, { profile, facts, title }) {
   } else if (riskTokens.length) {
     supported = false;
     reason = "unsupported_claim_term";
+  } else if (contextMismatchKinds.length) {
+    supported = false;
+    reason = "fact_context_mismatch";
   } else if (novelTokens.length > 0) {
     supported = false;
     reason = "unsupported_claim_language";
@@ -856,6 +991,7 @@ function auditClaim(claim, { profile, facts, title }) {
     unsupportedNumbers,
     unsupportedTechnicalCodes,
     qualificationDroppedFactIds: qualifierDroppedFacts.map((fact) => fact.id),
+    contextMismatchKinds,
     unsupportedTokens: Array.from(new Set([...riskTokens, ...novelTokens])).slice(0, 12),
   };
 }
@@ -870,6 +1006,8 @@ function auditOutputAgainstFacts(output, profile) {
   const matchedFactIds = Array.from(
     new Set(verifiedClaims.flatMap((entry) => entry.matchedFactIds || []).filter(Boolean)),
   );
+  const titleFactIds = new Set(facts.filter(isTitleFact).map((fact) => fact.id));
+  const verifiedBodyFactCount = matchedFactIds.filter((id) => !titleFactIds.has(id)).length;
 
   return {
     claimMap,
@@ -879,14 +1017,43 @@ function auditOutputAgainstFacts(output, profile) {
     rejectedClaims,
     matchedFactIds,
     verifiedFactCount: matchedFactIds.length,
+    verifiedBodyFactCount,
     completeFactCoverage: facts.every((fact) => matchedFactIds.includes(fact.id)),
   };
+}
+
+function rejectionReasonCounts(audit) {
+  const counts = {};
+  for (const entry of audit?.rejectedClaims || []) {
+    const reason = clean(entry?.reason) || "unknown";
+    counts[reason] = (counts[reason] || 0) + 1;
+  }
+  return counts;
+}
+
+function sanitizedRejectedClaimDiagnostics(audit) {
+  return (audit?.claimMap || [])
+    .map((entry, claimIndex) => ({ entry, claimIndex }))
+    .filter(({ entry }) => !entry.supported)
+    .slice(0, 8)
+    .map(({ entry, claimIndex }) => ({
+      claimIndex,
+      reason: entry.reason,
+      matchedFactIds: entry.matchedFactIds,
+      unsupportedTokens: entry.unsupportedTokens,
+      unsupportedNumbers: entry.unsupportedNumbers,
+      unsupportedTechnicalCodes: entry.unsupportedTechnicalCodes,
+      qualificationDroppedFactIds: entry.qualificationDroppedFactIds,
+      contextMismatchKinds: entry.contextMismatchKinds,
+    }));
 }
 
 function baseProof(profile, facts) {
   return {
     mode: PROOF_MODE,
     matcherVersion: MATCHER_VERSION,
+    coveragePolicy: "claims_only",
+    unsafeDraftExposed: false,
     profileId: clean(profile?.id) || null,
     profileVersion: profile ? Number(profile.version || 1) : null,
     factCount: facts.length,
@@ -995,7 +1162,10 @@ function applyClaimAwareFactGuard({
 
   const modelAudit = auditOutputAgainstFacts(output, profile);
 
-  if (modelAudit.rejectedClaimCount === 0 && modelAudit.completeFactCoverage) {
+  // Approved Proof Facts are a source pool, not a mandatory checklist.
+  // PASSED means every asserted claim is supported and at least one non-title
+  // Proof Fact grounds the output. Omitting unrelated approved facts is allowed.
+  if (modelAudit.rejectedClaimCount === 0 && modelAudit.verifiedBodyFactCount > 0) {
     return {
       output: clean(output),
       proof: {
@@ -1006,10 +1176,13 @@ function applyClaimAwareFactGuard({
         useCaseScope,
         scope: "selected_profile_facts_claim_audit",
         verifiedFactCount: modelAudit.verifiedFactCount,
+        verifiedBodyFactCount: modelAudit.verifiedBodyFactCount,
+        completeFactCoverage: modelAudit.completeFactCoverage,
         matchedFactIds: modelAudit.matchedFactIds,
         claimCount: modelAudit.claimCount,
         verifiedClaimCount: modelAudit.verifiedClaimCount,
         rejectedClaimCount: 0,
+        rejectionReasonCounts: {},
         safeOutputApplied: false,
       },
     };
@@ -1021,7 +1194,7 @@ function applyClaimAwareFactGuard({
   const safeAudit = auditOutputAgainstFacts(safeOutput, profile);
   const reason = modelAudit.rejectedClaimCount > 0
     ? "unsupported_claims_detected"
-    : "incomplete_fact_coverage";
+    : "insufficient_fact_grounding";
 
   return {
     output: safeOutput,
@@ -1032,23 +1205,18 @@ function applyClaimAwareFactGuard({
       action: safeActionForScope(useCaseScope),
       useCaseScope,
       humanReviewRequired: false,
-      finalOutputVerified: safeAudit.rejectedClaimCount === 0 && safeAudit.completeFactCoverage,
+      finalOutputVerified: safeAudit.rejectedClaimCount === 0 && safeAudit.verifiedBodyFactCount > 0,
       scope: "selected_profile_facts_claim_audit",
       reason,
       verifiedFactCount: safeAudit.verifiedFactCount,
+      verifiedBodyFactCount: safeAudit.verifiedBodyFactCount,
+      completeFactCoverage: safeAudit.completeFactCoverage,
       matchedFactIds: safeAudit.matchedFactIds,
       claimCount: modelAudit.claimCount,
       verifiedClaimCount: modelAudit.verifiedClaimCount,
       rejectedClaimCount: modelAudit.rejectedClaimCount,
-      rejectedClaims: modelAudit.rejectedClaims.slice(0, 8).map((entry) => ({
-        text: entry.text.slice(0, 240),
-        reason: entry.reason,
-        matchedFactIds: entry.matchedFactIds,
-        unsupportedTokens: entry.unsupportedTokens,
-        unsupportedNumbers: entry.unsupportedNumbers,
-        unsupportedTechnicalCodes: entry.unsupportedTechnicalCodes,
-        qualificationDroppedFactIds: entry.qualificationDroppedFactIds,
-      })),
+      rejectionReasonCounts: rejectionReasonCounts(modelAudit),
+      rejectedClaims: sanitizedRejectedClaimDiagnostics(modelAudit),
       safeOutputApplied: true,
       safeOutputVerifiedClaimCount: safeAudit.verifiedClaimCount,
       safeOutputRejectedClaimCount: safeAudit.rejectedClaimCount,

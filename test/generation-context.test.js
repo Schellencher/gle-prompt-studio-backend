@@ -66,5 +66,8 @@ assert(profileBlock.includes("USB-C"));
 assert(profileBlock.includes("not independently verified world truth"));
 assert(profileBlock.includes("Natural wording is allowed"));
 assert(profileBlock.includes("Do not add benefits, suitability, performance"));
+assert(profileBlock.includes("source pool, not a checklist"));
+assert(profileBlock.includes("Neutral headings, engagement questions"));
+assert(profileBlock.includes("hashtag may only repeat an approved name or approved fact value"));
 
 console.log("GLE generation context test passed");

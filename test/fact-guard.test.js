@@ -86,7 +86,9 @@ assert(!reviewed.output.toLowerCase().includes("schnell"));
 assert(!reviewed.output.toLowerCase().includes("robust"));
 assert(!reviewed.output.toLowerCase().includes("wetter"));
 assert(!reviewed.output.toLowerCase().includes("kompakt"));
-assert(reviewed.proof.rejectedClaims.some((claim) => /schnell/i.test(claim.text)));
+assert.equal(reviewed.proof.unsafeDraftExposed, false);
+assert(reviewed.proof.rejectedClaims.every((claim) => !("text" in claim)));
+assert(reviewed.proof.rejectionReasonCounts.unsupported_claim_term >= 1);
 
 const wrongConnector = applyClaimAwareFactGuard({
   output: `TrailFold 12\n\nTrailFold 12 bietet einen USB-A-Anschluss, warmweißes Licht und eine Akkulaufzeit von bis zu 12 Stunden.`,
@@ -106,15 +108,17 @@ const inventedNumber = applyClaimAwareFactGuard({
 assert.equal(inventedNumber.proof.status, "SAFE_REWRITE");
 assert(inventedNumber.proof.rejectedClaims.some((claim) => claim.reason === "unsupported_number"));
 
-const incomplete = applyClaimAwareFactGuard({
+const partialButGrounded = applyClaimAwareFactGuard({
   output: `TrailFold 12\n\nTrailFold 12 bietet einen USB-C-Anschluss.\n\nDetails ansehen.`,
   profile,
   isProductDescription: true,
   outLang: "DE",
 });
-assert.equal(incomplete.proof.status, "SAFE_REWRITE");
-assert.equal(incomplete.proof.reason, "incomplete_fact_coverage");
-assert.equal(incomplete.output, safe);
+assert.equal(partialButGrounded.proof.status, "PASSED");
+assert.equal(partialButGrounded.proof.coveragePolicy, "claims_only");
+assert.equal(partialButGrounded.proof.completeFactCoverage, false);
+assert(partialButGrounded.proof.verifiedBodyFactCount >= 1);
+assert.equal(partialButGrounded.output.includes("warmweiß"), false);
 
 const noProfile = applyClaimAwareFactGuard({
   output: "Normaler Output",
@@ -423,7 +427,7 @@ const smartCombinedResult = applyClaimAwareFactGuard({
   outLang: "DE",
 });
 assert.equal(smartCombinedResult.proof.status, "PASSED");
-assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7");
+assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.1-integrity");
 assert.equal(smartCombinedResult.proof.verifiedFactCount, 4);
 assert.equal(smartCombinedResult.proof.verifiedClaimCount, 1);
 assert.equal(smartCombinedResult.proof.rejectedClaimCount, 0);
@@ -483,5 +487,92 @@ const smartStillRejectsBenefit = applyClaimAwareFactGuard({
 });
 assert.equal(smartStillRejectsBenefit.proof.status, "SAFE_REWRITE");
 assert(smartStillRejectsBenefit.proof.rejectedClaims.some((claim) => claim.reason === "unsupported_claim_term"));
+
+
+
+// v2.7.1 integrity sweep -----------------------------------------------------
+const wrongFactContext1 = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nDie Lichtfarbe ist USB-C.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(wrongFactContext1.proof.status, "SAFE_REWRITE");
+assert(wrongFactContext1.proof.rejectedClaims.some((claim) => claim.reason === "fact_context_mismatch"));
+
+const wrongFactContext2 = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nDer Anschluss ist warmweiß.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(wrongFactContext2.proof.status, "SAFE_REWRITE");
+assert(wrongFactContext2.proof.rejectedClaims.some((claim) => claim.reason === "fact_context_mismatch"));
+
+const wrongFactContextCombined = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nAnschluss: warmweiß, Lichtfarbe: USB-C.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(wrongFactContextCombined.proof.status, "SAFE_REWRITE");
+assert(wrongFactContextCombined.proof.rejectedClaims.some((claim) => claim.reason === "fact_context_mismatch"));
+
+const supportedCombined = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nTrailFold 12 kombiniert einen USB-C-Anschluss, warmweißes Licht und eine Akkulaufzeit von bis zu 12 Stunden.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(supportedCombined.proof.status, "PASSED");
+assert.equal(supportedCombined.proof.rejectedClaimCount, 0);
+
+const riskyQuestion = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nIst TrailFold 12 die perfekte Lampe fürs Camping?\nUSB-C-Anschluss.`,
+  profile,
+  isSocial: true,
+  outLang: "DE",
+});
+assert.equal(riskyQuestion.proof.status, "SAFE_REWRITE");
+assert(riskyQuestion.proof.rejectionReasonCounts.unsupported_claim_term >= 1);
+
+const approvedQuestionAudit = auditOutputAgainstFacts(
+  `TrailFold 12\nWelchen Anschluss hat TrailFold 12?\nUSB-C.\nWelcher Punkt interessiert dich am meisten?`,
+  profile,
+);
+assert.equal(approvedQuestionAudit.rejectedClaimCount, 0);
+
+const safeHashtags = applyClaimAwareFactGuard({
+  output: `TrailFold 12\nUSB-C-Anschluss.\n#TrailFold12 #USB-C`,
+  profile,
+  isSocial: true,
+  outLang: "DE",
+});
+assert.equal(safeHashtags.proof.status, "PASSED");
+
+const riskyHashtags = applyClaimAwareFactGuard({
+  output: `TrailFold 12\nUSB-C-Anschluss.\n#Camping #TrailFold12`,
+  profile,
+  isSocial: true,
+  outLang: "DE",
+});
+assert.equal(riskyHashtags.proof.status, "SAFE_REWRITE");
+
+const titleOnly = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nDetails ansehen.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(titleOnly.proof.status, "SAFE_REWRITE");
+assert.equal(titleOnly.proof.reason, "insufficient_fact_grounding");
+
+const safeNowCta = applyClaimAwareFactGuard({
+  output: `TrailFold 12\n\nUSB-C-Anschluss.\n\nJetzt Details ansehen.`,
+  profile,
+  isProductDescription: true,
+  outLang: "DE",
+});
+assert.equal(safeNowCta.proof.status, "PASSED");
 
 console.log("GLE Fact Guard v2.7 smart claim matching test passed");

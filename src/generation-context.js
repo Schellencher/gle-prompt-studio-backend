@@ -48,8 +48,11 @@ function buildGroundingPromptBlock({ profile = null } = {}) {
       "- A selected Magic Context profile follows below. Its approved profile facts may be used as user-approved context, but they are not independently verified world truth.",
       "- Do not contradict approved profile facts. Do not infer additional profile-specific facts beyond what the profile says.",
       "- Natural wording is allowed, but every factual product/company/project claim must be directly supported by approved profile facts.",
+      "- Approved profile facts are a source pool, not a checklist. Use only the facts relevant to the requested format; do not force every approved fact into every output.",
       "- Do not add benefits, suitability, performance, quality adjectives, use cases, causal effects or implications unless they are explicitly approved facts.",
-      "- Prefer one concise natural sentence that combines the approved facts instead of adding explanatory claims.",
+      "- Neutral headings, engagement questions and non-transactional CTAs are allowed only when they add no new product/company/project claim.",
+      "- Do not add hashtags that imply unapproved benefits or use cases. A hashtag may only repeat an approved name or approved fact value.",
+      "- Prefer concise natural wording over explanatory filler.",
       buildProfilePromptBlock(profile),
     );
   }
