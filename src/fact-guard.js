@@ -264,6 +264,175 @@ function buildLandingFactOutput(profile, { outLang = "DE" } = {}) {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+
+function factLabelValue(fact) {
+  return `${clean(fact?.label)}: ${clean(fact?.value)}`.trim();
+}
+
+function bodyFactsFor(profile, facts) {
+  const titleFact = facts.find(isTitleFact) || null;
+  const bodyFacts = titleFact ? facts.filter((fact) => fact.id !== titleFact.id) : facts;
+  return { titleFact, bodyFacts: bodyFacts.length ? bodyFacts : facts };
+}
+
+function cycleFacts(facts, count) {
+  const source = Array.isArray(facts) ? facts.filter(Boolean) : [];
+  if (!source.length || count <= 0) return [];
+  const out = [];
+  for (let i = 0; i < count; i += 1) out.push(source[i % source.length]);
+  return out;
+}
+
+function deFactSentence(fact, title = "") {
+  const label = normalize(fact?.label);
+  const value = clean(fact?.value);
+  const subject = title || "Das Produkt";
+
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return `${subject} hat einen ${value}-Anschluss.`;
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return `Die Lichtfarbe ist ${value}.`;
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return `Die Akkulaufzeit beträgt ${value}.`;
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return `Das Fassungsvermögen beträgt ${value}.`;
+  if (/^(material|werkstoff)$/.test(label)) return `Das Material ist ${value}.`;
+  if (/^(farbe|color|colour)$/.test(label)) return `Die Farbe ist ${value}.`;
+  if (/^(preis|price)$/.test(label)) return `Der Preis beträgt ${value}.`;
+  if (/^(gewicht|weight)$/.test(label)) return `Das Gewicht beträgt ${value}.`;
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return `Die Abmessungen sind ${value}.`;
+  return `${clean(fact.label)}: ${value}.`;
+}
+
+function enFactSentence(fact, title = "") {
+  const label = normalize(fact?.label);
+  const value = clean(fact?.value);
+  const subject = title || "The product";
+
+  if (/^(anschluss|connector|port|schnittstelle)$/.test(label)) return `${subject} has a ${value} port.`;
+  if (/^(lichtfarbe|light color|licht|light)$/.test(label)) return `The light color is ${value}.`;
+  if (/^(akkulaufzeit|battery life|laufzeit|runtime)$/.test(label)) return `Battery life is ${value}.`;
+  if (/^(fassungsvermoegen|capacity|volumen|volume)$/.test(label)) return `Capacity is ${value}.`;
+  if (/^(material|werkstoff)$/.test(label)) return `The material is ${value}.`;
+  if (/^(farbe|color|colour)$/.test(label)) return `The color is ${value}.`;
+  if (/^(preis|price)$/.test(label)) return `The price is ${value}.`;
+  if (/^(gewicht|weight)$/.test(label)) return `The weight is ${value}.`;
+  if (/^(abmessungen|dimensions|groesse|size)$/.test(label)) return `The dimensions are ${value}.`;
+  return `${clean(fact.label)}: ${value}.`;
+}
+
+function buildSocialFactOutput(profile, { outLang = "DE" } = {}) {
+  const facts = approvedFacts(profile);
+  if (!facts.length) return "";
+  const title = pickTitle(profile, facts);
+  const { bodyFacts } = bodyFactsFor(profile, facts);
+  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
+  const bullets = cycleFacts(facts, 4);
+  const hook = title
+    ? (isEnglish(outLang) ? `${title} at a glance.` : `${title} auf einen Blick.`)
+    : (isEnglish(outLang) ? "Product facts at a glance." : "Produktangaben auf einen Blick.");
+  const main = summary
+    ? (isEnglish(outLang) ? `${title || "The product"} offers ${summary}.` : `${title || "Das Produkt"} bietet ${summary}.`)
+    : (title ? `${title}.` : factLabelValue(facts[0]));
+  const lines = [hook, main];
+  for (const fact of bullets) lines.push(`- ${bulletFn(fact)}`);
+  lines.push(title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+  return lines.join("\n").trim();
+}
+
+function buildLinkedInFactOutput(profile, { outLang = "DE" } = {}) {
+  const facts = approvedFacts(profile);
+  if (!facts.length) return "";
+  const title = pickTitle(profile, facts);
+  const { bodyFacts } = bodyFactsFor(profile, facts);
+  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
+  const headline = title
+    ? (isEnglish(outLang) ? `${title} at a glance` : `${title} im Überblick`)
+    : (isEnglish(outLang) ? "Product facts" : "Produktangaben");
+  const lines = [headline, ""];
+  if (summary) lines.push(isEnglish(outLang)
+    ? `${title || "The product"} offers ${summary}.`
+    : `${title || "Das Produkt"} bietet ${summary}.`, "");
+  lines.push(isEnglish(outLang) ? "Facts" : "Fakten");
+  for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
+  lines.push("", title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function buildEmailFactOutput(profile, { outLang = "DE" } = {}) {
+  const facts = approvedFacts(profile);
+  if (!facts.length) return "";
+  const title = pickTitle(profile, facts);
+  const { bodyFacts } = bodyFactsFor(profile, facts);
+  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
+  const lines = [
+    `${isEnglish(outLang) ? "Subject" : "Betreff"}: ${title || (isEnglish(outLang) ? "Product details" : "Produktdetails")}`,
+    "",
+    isEnglish(outLang) ? "Hello," : "Hallo,",
+    "",
+  ];
+  if (summary) lines.push(isEnglish(outLang)
+    ? `${title || "The product"} offers ${summary}.`
+    : `${title || "Das Produkt"} bietet ${summary}.`, "");
+  lines.push(isEnglish(outLang) ? "At a glance" : "Auf einen Blick");
+  for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
+  lines.push("", title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."),
+    "",
+    isEnglish(outLang) ? "Best regards" : "Viele Grüße");
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function buildBlogFactOutput(profile, { outLang = "DE" } = {}) {
+  const facts = approvedFacts(profile);
+  if (!facts.length) return "";
+  const title = pickTitle(profile, facts);
+  const { bodyFacts } = bodyFactsFor(profile, facts);
+  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const summary = joinPhrases(bodyFacts.map(phraseFn), outLang);
+  const lines = [title || (isEnglish(outLang) ? "Product details" : "Produktdetails"), ""];
+  if (summary) lines.push(isEnglish(outLang)
+    ? `${title || "The product"} offers ${summary}.`
+    : `${title || "Das Produkt"} bietet ${summary}.`, "");
+  lines.push(isEnglish(outLang) ? "Product details" : "Produktdetails");
+  for (const fact of bodyFacts) lines.push(`- ${bulletFn(fact)}`);
+  lines.push("", isEnglish(outLang) ? "Summary" : "Kurz zusammengefasst");
+  if (summary) lines.push(isEnglish(outLang)
+    ? `${title || "The product"}: ${summary}.`
+    : `${title || "Das Produkt"}: ${summary}.`);
+  lines.push("", title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen."));
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function buildShortVideoFactOutput(profile, { outLang = "DE" } = {}) {
+  const facts = approvedFacts(profile);
+  if (!facts.length) return "";
+  const title = pickTitle(profile, facts);
+  const { bodyFacts } = bodyFactsFor(profile, facts);
+  const sceneFacts = cycleFacts(bodyFacts, 3);
+  const sentenceFn = isEnglish(outLang) ? enFactSentence : deFactSentence;
+  const bulletFn = isEnglish(outLang) ? enLandingBullet : deLandingBullet;
+  const lines = [];
+  sceneFacts.forEach((fact, index) => {
+    lines.push(`${isEnglish(outLang) ? "Scene" : "Szene"} ${index + 1}: ${bulletFn(fact)}`);
+    lines.push(`${isEnglish(outLang) ? "Voiceover" : "Sprecher"}: ${sentenceFn(fact, title)}`);
+  });
+  lines.push(`${isEnglish(outLang) ? "CTA" : "CTA-Zeile"}: ${title
+    ? (isEnglish(outLang) ? `View ${title} details.` : `Details zu ${title} ansehen.`)
+    : (isEnglish(outLang) ? "View details." : "Details ansehen.")}`);
+  return lines.join("\n").trim();
+}
+
 // Kept as a compatibility export for tests/tools that still reference the v1 name.
 function buildFactOnlyOutput(profile, options = {}) {
   return buildNaturalFactOutput(profile, options);
@@ -276,10 +445,14 @@ const SAFE_GLUE = new Set([
   "ist", "sind", "hat", "haben", "bietet", "bieten", "verfuegt", "verfuegen", "ueber",
   "umfasst", "enthalten", "enthaelt", "betragt", "betraegt", "liegt", "bei", "erreicht",
   "produkt", "modell", "details", "ansehen", "freigegeben", "freigegebene", "angaben", "fakten",
+  "blick", "ueberblick", "kurz", "zusammengefasst", "betreff", "hallo", "gruesse", "viele",
+  "produktdetails", "sprecher", "szene", "einblendung", "abschluss",
   // EN grammatical glue / neutral verbs
   "the", "a", "an", "and", "or", "with", "of", "to", "up", "for", "in", "on", "as",
   "is", "are", "has", "have", "offers", "offer", "features", "feature", "includes", "include",
   "provides", "provide", "reaches", "details", "view", "approved", "facts", "product", "model",
+  "glance", "overview", "summary", "subject", "hello", "regards", "best", "scene", "voiceover",
+  "productdetails", "product",
 ]);
 
 const CLAIM_RISK_TOKENS = new Set([
@@ -344,11 +517,11 @@ function technicalCodes(value) {
 }
 
 
-function isStructuralLandingLine(value) {
+function isStructuralLine(value) {
   const line = clean(value)
     .replace(/^\d+[.)]\s*/, "")
     .trim();
-  return /^(bulletpoints|bullet points|mini[- ]?faq|faq|auf einen blick|at a glance)\s*:?$/i.test(line);
+  return /^(bulletpoints|bullet points|mini[- ]?faq|faq|auf einen blick|at a glance|fakten|facts|produktdetails|product details|kurz zusammengefasst|summary|hallo|hello|viele gr(?:ü|ue)ße|best regards)\s*[:,]?$/.test(line.toLowerCase());
 }
 
 function isQuestionLine(value) {
@@ -363,14 +536,14 @@ function stripClaimPrefix(value) {
   return clean(value)
     .replace(/^[-•*]+\s*/, "")
     .replace(/^\d+[.)]\s*/, "")
-    .replace(/^(frage|antwort|question|answer|cta(?:[- ]?zeile)?|mini faq)\s*:\s*/i, "")
+    .replace(/^(frage|antwort|question|answer|cta(?:[- ]?zeile)?|mini faq|betreff|subject|sprecher|voiceover|einblendung|overlay|abschluss|szene\s*\d+|scene\s*\d+)\s*:\s*/i, "")
     .trim();
 }
 
 function splitClaims(output) {
   const out = [];
   for (const rawLine of clean(output).split(/\r?\n/)) {
-    if (isStructuralLandingLine(rawLine) || isQuestionLine(rawLine)) continue;
+    if (isStructuralLine(rawLine) || isQuestionLine(rawLine)) continue;
     const line = stripClaimPrefix(rawLine);
     if (!line) continue;
 
@@ -497,12 +670,82 @@ function baseProof(profile, facts) {
   };
 }
 
-function applyClaimAwareFactGuard({ output, profile, isProductDescription, isLandingPage, outLang } = {}) {
+function resolveUseCaseScope({
+  isProductDescription,
+  isLandingPage,
+  isSocial,
+  isLinkedInPost,
+  isEmailPost,
+  isBlogArticle,
+  isShortVideoScript,
+} = {}) {
+  // Explicit use-case flags take precedence over the broad product-description detector.
+  if (isLandingPage) return "landingpage_ad_copy";
+  if (isSocial) return "social_media_post";
+  if (isLinkedInPost) return "linkedin_post";
+  if (isEmailPost) return "email";
+  if (isBlogArticle) return "blog_article";
+  if (isShortVideoScript) return "short_video_script";
+  if (isProductDescription) return "product_description";
+  return "";
+}
+
+function buildSafeOutputForScope(useCaseScope, profile, { outLang = "DE" } = {}) {
+  switch (useCaseScope) {
+    case "landingpage_ad_copy":
+      return buildLandingFactOutput(profile, { outLang });
+    case "social_media_post":
+      return buildSocialFactOutput(profile, { outLang });
+    case "linkedin_post":
+      return buildLinkedInFactOutput(profile, { outLang });
+    case "email":
+      return buildEmailFactOutput(profile, { outLang });
+    case "blog_article":
+      return buildBlogFactOutput(profile, { outLang });
+    case "short_video_script":
+      return buildShortVideoFactOutput(profile, { outLang });
+    case "product_description":
+    default:
+      return buildNaturalFactOutput(profile, { outLang });
+  }
+}
+
+function safeActionForScope(useCaseScope) {
+  return {
+    landingpage_ad_copy: "safe_landing_rewrite",
+    social_media_post: "safe_social_rewrite",
+    linkedin_post: "safe_linkedin_rewrite",
+    email: "safe_email_rewrite",
+    blog_article: "safe_blog_rewrite",
+    short_video_script: "safe_video_rewrite",
+    product_description: "safe_natural_rewrite",
+  }[useCaseScope] || "safe_natural_rewrite";
+}
+
+function applyClaimAwareFactGuard({
+  output,
+  profile,
+  isProductDescription,
+  isLandingPage,
+  isSocial,
+  isLinkedInPost,
+  isEmailPost,
+  isBlogArticle,
+  isShortVideoScript,
+  outLang,
+} = {}) {
   const facts = approvedFacts(profile);
   const base = baseProof(profile, facts);
-
-  const supportedUseCase = !!isProductDescription || !!isLandingPage;
-  const useCaseScope = isLandingPage ? "landingpage_ad_copy" : "product_description";
+  const useCaseScope = resolveUseCaseScope({
+    isProductDescription,
+    isLandingPage,
+    isSocial,
+    isLinkedInPost,
+    isEmailPost,
+    isBlogArticle,
+    isShortVideoScript,
+  });
+  const supportedUseCase = !!useCaseScope;
 
   if (!profile || !supportedUseCase || !facts.length) {
     return {
@@ -546,13 +789,9 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, isLan
     };
   }
 
-  // Do not expose the unverified model draft. V2 replaces it with a deterministic,
-  // natural-language renderer built only from approved facts, while keeping the
-  // SAFE_REWRITE means the unverified model draft was discarded and the final output
-  // was deterministically rebuilt only from approved Proof Facts. Human review is not required.
-  const safeOutput = isLandingPage
-    ? buildLandingFactOutput(profile, { outLang })
-    : buildNaturalFactOutput(profile, { outLang });
+  // Never expose an unverified model draft. SAFE_REWRITE means the delivered final
+  // output was rebuilt only from approved Proof Facts in the native use-case format.
+  const safeOutput = buildSafeOutputForScope(useCaseScope, profile, { outLang });
   const safeAudit = auditOutputAgainstFacts(safeOutput, profile);
   const reason = modelAudit.rejectedClaimCount > 0
     ? "unsupported_claims_detected"
@@ -564,10 +803,10 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, isLan
       ...base,
       status: "SAFE_REWRITE",
       applied: true,
-      action: isLandingPage ? "safe_landing_rewrite" : "safe_natural_rewrite",
+      action: safeActionForScope(useCaseScope),
       useCaseScope,
       humanReviewRequired: false,
-      finalOutputVerified: true,
+      finalOutputVerified: safeAudit.rejectedClaimCount === 0 && safeAudit.completeFactCoverage,
       scope: "selected_profile_facts_claim_audit",
       reason,
       verifiedFactCount: safeAudit.verifiedFactCount,
@@ -585,6 +824,7 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, isLan
       })),
       safeOutputApplied: true,
       safeOutputVerifiedClaimCount: safeAudit.verifiedClaimCount,
+      safeOutputRejectedClaimCount: safeAudit.rejectedClaimCount,
     },
   };
 }
@@ -599,10 +839,17 @@ module.exports = {
   approvedFacts,
   buildNaturalFactOutput,
   buildLandingFactOutput,
+  buildSocialFactOutput,
+  buildLinkedInFactOutput,
+  buildEmailFactOutput,
+  buildBlogFactOutput,
+  buildShortVideoFactOutput,
   buildFactOnlyOutput,
   splitClaims,
   auditClaim,
   auditOutputAgainstFacts,
+  resolveUseCaseScope,
+  buildSafeOutputForScope,
   applyClaimAwareFactGuard,
   applyStrictProfileFactGuard,
 };

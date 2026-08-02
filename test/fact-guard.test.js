@@ -6,6 +6,11 @@ const {
   PROOF_MODE,
   buildNaturalFactOutput,
   buildLandingFactOutput,
+  buildSocialFactOutput,
+  buildLinkedInFactOutput,
+  buildEmailFactOutput,
+  buildBlogFactOutput,
+  buildShortVideoFactOutput,
   auditOutputAgainstFacts,
   applyClaimAwareFactGuard,
 } = require("../src/fact-guard");
@@ -193,4 +198,180 @@ assert(!landingRewritten.output.toLowerCase().includes("perfekt"));
 assert(!landingRewritten.output.toLowerCase().includes("robust"));
 assert(!landingRewritten.output.toLowerCase().includes("schnellladen"));
 
-console.log("GLE Fact Guard v2.2 natural landing safe rewrite test passed");
+
+
+// v2.3 full Studio coverage ---------------------------------------------------
+function assertSafeRewriteResult(result, expectedScope, expectedAction) {
+  assert.equal(result.proof.status, "SAFE_REWRITE");
+  assert.equal(result.proof.useCaseScope, expectedScope);
+  assert.equal(result.proof.action, expectedAction);
+  assert.equal(result.proof.safeOutputApplied, true);
+  assert.equal(result.proof.humanReviewRequired, false);
+  assert.equal(result.proof.finalOutputVerified, true);
+  assert.equal(result.proof.verifiedFactCount, 4);
+  assert.equal(result.proof.safeOutputRejectedClaimCount, 0);
+  assert(!result.output.toLowerCase().includes("robust"));
+  assert(!result.output.toLowerCase().includes("camping"));
+  assert(!result.output.toLowerCase().includes("wandern"));
+  assert(!result.output.toLowerCase().includes("schnell"));
+  assert(!result.output.toLowerCase().includes("vielseitig"));
+  assert(!result.output.toLowerCase().includes("angenehme atmosphäre"));
+}
+
+const safeSocial = buildSocialFactOutput(profile, { outLang: "DE" });
+assert.equal(safeSocial.split("\n").length, 7);
+assert(safeSocial.includes("TrailFold 12"));
+assert(safeSocial.includes("USB-C"));
+assert(safeSocial.includes("warmweiß"));
+assert(safeSocial.includes("bis zu 12 Stunden"));
+assert(safeSocial.endsWith("Details zu TrailFold 12 ansehen."));
+const safeSocialAudit = auditOutputAgainstFacts(safeSocial, profile);
+assert.equal(safeSocialAudit.rejectedClaimCount, 0);
+assert.equal(safeSocialAudit.completeFactCoverage, true);
+
+const badSocial = `Erstelle eine kurze Landingpage für das ausgewählte Produkt.: das Wichtigste auf einen Blick.
+Eine klare Struktur hilft, bekannte Informationen und offene Fragen sauber zu trennen.
+- Den zentralen Punkt in den Fokus stellen.
+- Aussagen an die vorhandenen Angaben binden.
+- Fakten und Annahmen klar voneinander trennen.
+- Nicht belegte Details weglassen.
+Mehr zum Thema erfahren.`;
+const socialRewritten = applyClaimAwareFactGuard({
+  output: badSocial,
+  profile,
+  isSocial: true,
+  isProductDescription: false,
+  outLang: "DE",
+});
+assertSafeRewriteResult(socialRewritten, "social_media_post", "safe_social_rewrite");
+assert.equal(socialRewritten.output, safeSocial);
+assert.equal(socialRewritten.output.split("\n").length, 7);
+
+const safeLinkedIn = buildLinkedInFactOutput(profile, { outLang: "DE" });
+const safeLinkedInAudit = auditOutputAgainstFacts(safeLinkedIn, profile);
+assert.equal(safeLinkedInAudit.rejectedClaimCount, 0);
+assert.equal(safeLinkedInAudit.completeFactCoverage, true);
+assert(safeLinkedIn.includes("Fakten"));
+const badLinkedIn = `TrailFold 12 – Produktbeschreibung
+
+1) Produktname: TrailFold 12
+Kompaktes Outdoor-Produkt für vielseitige Anwendungen.
+
+2) Anschluss: USB-C
+Moderne Verbindung für einfache Handhabung.
+
+3) Lichtfarbe: warmweiß
+Angenehme Lichtfarbe für entspannte Atmosphäre.
+
+4) Akkulaufzeit: bis zu 12 Stunden
+Langanhaltende Nutzung ohne häufiges Aufladen.
+
+Details anzeigen.`;
+const linkedInRewritten = applyClaimAwareFactGuard({
+  output: badLinkedIn,
+  profile,
+  isLinkedInPost: true,
+  isProductDescription: true, // proves explicit use-case wins over broad product detector
+  outLang: "DE",
+});
+assertSafeRewriteResult(linkedInRewritten, "linkedin_post", "safe_linkedin_rewrite");
+assert.equal(linkedInRewritten.output, safeLinkedIn);
+
+const safeEmail = buildEmailFactOutput(profile, { outLang: "DE" });
+const safeEmailAudit = auditOutputAgainstFacts(safeEmail, profile);
+assert.equal(safeEmailAudit.rejectedClaimCount, 0);
+assert.equal(safeEmailAudit.completeFactCoverage, true);
+assert(safeEmail.startsWith("Betreff: TrailFold 12"));
+assert(safeEmail.includes("Hallo,"));
+assert(safeEmail.endsWith("Viele Grüße"));
+const weakEmail = `Produktbeschreibung: TrailFold 12
+
+1) Produktname: TrailFold 12
+2) Anschluss: USB-C
+3) Lichtfarbe: warmweiß
+4) Akkulaufzeit: bis zu 12 Stunden
+
+Details ansehen.`;
+const emailRewritten = applyClaimAwareFactGuard({
+  output: weakEmail,
+  profile,
+  isEmailPost: true,
+  outLang: "DE",
+});
+// The factual list itself may pass the claim audit. The safe renderer is exercised directly
+// and unsafe email claims are exercised below.
+const badEmail = `Betreff: TrailFold 12 für lange Outdoor-Abende
+
+Hallo,
+TrailFold 12 ist die ideale robuste Lampe für Camping und Wandern. USB-C ermöglicht schnelles Aufladen und die Akkulaufzeit beträgt bis zu 12 Stunden.
+
+Jetzt kaufen.`;
+const emailUnsafe = applyClaimAwareFactGuard({
+  output: badEmail,
+  profile,
+  isEmailPost: true,
+  outLang: "DE",
+});
+assertSafeRewriteResult(emailUnsafe, "email", "safe_email_rewrite");
+assert.equal(emailUnsafe.output, safeEmail);
+
+const safeBlog = buildBlogFactOutput(profile, { outLang: "DE" });
+const safeBlogAudit = auditOutputAgainstFacts(safeBlog, profile);
+assert.equal(safeBlogAudit.rejectedClaimCount, 0);
+assert.equal(safeBlogAudit.completeFactCoverage, true);
+assert(safeBlog.includes("Produktdetails"));
+const badBlog = `Produktbeschreibung: TrailFold 12
+
+TrailFold 12 ist ein vielseitiges Outdoor-Produkt, das für verschiedene Anwendungen konzipiert wurde.
+Das Gerät verfügt über einen USB-C-Anschluss, der eine einfache und schnelle Verbindung ermöglicht.
+Die Lichtfarbe ist warmweiß, was eine angenehme Atmosphäre schafft.
+Mit einer Akkulaufzeit von bis zu 12 Stunden eignet sich das Produkt ideal für längere Outdoor-Aktivitäten.
+
+Mehr erfahren.`;
+const blogRewritten = applyClaimAwareFactGuard({
+  output: badBlog,
+  profile,
+  isBlogArticle: true,
+  outLang: "DE",
+});
+assertSafeRewriteResult(blogRewritten, "blog_article", "safe_blog_rewrite");
+assert.equal(blogRewritten.output, safeBlog);
+
+const safeVideo = buildShortVideoFactOutput(profile, { outLang: "DE" });
+const safeVideoAudit = auditOutputAgainstFacts(safeVideo, profile);
+assert.equal(safeVideoAudit.rejectedClaimCount, 0);
+assert.equal(safeVideoAudit.completeFactCoverage, true);
+assert(safeVideo.includes("Szene 1:"));
+assert(safeVideo.includes("Sprecher:"));
+assert(safeVideo.includes("CTA-Zeile:"));
+const badVideo = `Produktbeschreibung für TrailFold 12
+
+1) Produktname: TrailFold 12, tragbare Lichtquelle für Outdoor-Aktivitäten.
+2) Anschluss: USB-C Anschluss für einfache Verbindung und Aufladung.
+3) Lichtfarbe: Warmweiß für angenehme Beleuchtung in der Natur.
+4) Akkulaufzeit: Bis zu 12 Stunden, ideal für längere Ausflüge.
+5) Zielgruppe: Outdoor-Enthusiasten, die eine praktische Lichtquelle suchen.
+6) Anwendung: Geeignet für Camping, Wandern und abendliche Aktivitäten im Freien.
+
+CTA-Zeile: Details abrufen.`;
+const videoRewritten = applyClaimAwareFactGuard({
+  output: badVideo,
+  profile,
+  isShortVideoScript: true,
+  outLang: "DE",
+});
+assertSafeRewriteResult(videoRewritten, "short_video_script", "safe_video_rewrite");
+assert.equal(videoRewritten.output, safeVideo);
+
+// Clean native output is still allowed through unchanged for the newly supported scopes.
+const socialPassed = applyClaimAwareFactGuard({
+  output: safeSocial,
+  profile,
+  isSocial: true,
+  outLang: "DE",
+});
+assert.equal(socialPassed.proof.status, "PASSED");
+assert.equal(socialPassed.output, safeSocial);
+
+
+console.log("GLE Fact Guard v2.3 full Studio use-case coverage test passed");

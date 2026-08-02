@@ -3314,17 +3314,21 @@ app.post("/api/generate", async (req, res) => {
       }
     }
 
-    // Proof-of-Execution / Fact Guard v2 (claim-aware scope):
-    // Product descriptions and Landingpage/Ad-Copy with selected approved Proof Facts
-    // may keep natural model wording only when every factual claim can be
-    // deterministically matched to approved facts and all approved facts are covered.
-    // Otherwise the unsafe draft is withheld and replaced with a deterministic safe
-    // rewrite built only from approved Proof Facts.
+    // Proof-of-Execution / Fact Guard v2.3 (claim-aware scope):
+    // All Studio content use-cases are audited against selected approved Proof Facts.
+    // Natural model wording is kept only when every factual claim can be matched and
+    // all approved facts are covered. Otherwise the unsafe draft is withheld and
+    // replaced with a deterministic, use-case-native SAFE REWRITE.
     const guardedResult = applyClaimAwareFactGuard({
       output,
       profile: activeProfile,
       isProductDescription,
       isLandingPage,
+      isSocial,
+      isLinkedInPost,
+      isEmailPost,
+      isBlogArticle,
+      isShortVideoScript,
       outLang,
     });
     output = guardedResult.output;
