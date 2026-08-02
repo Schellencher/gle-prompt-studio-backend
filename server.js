@@ -72,6 +72,9 @@ const {
   buildQuickActionPrompt,
   buildQuickActionRepairPrompt,
   detectUseCaseFlags,
+  normalizeVisibleText,
+  assessQuickActionChange,
+  applyActionAwareSafeVariant,
 } = require("./src/quick-actions");
 
 const betaAccess = createBetaAccessControl(process.env);
@@ -3492,7 +3495,90 @@ app.post("/api/transform", async (req, res) => {
       forceSafeRewriteReason: "social_structure_invalid",
     });
     output = repairEncodingArtifacts(guardedResult.output);
-    const proofResult = guardedResult.proof;
+    let proofResult = guardedResult.proof;
+    let safeVariantApplied = false;
+
+    // If Fact Guard had to rebuild the transform, CTA/headline actions get one
+    // deterministic, fact-only variant so the requested action is not silently
+    // lost behind the generic SAFE_REWRITE template. The candidate is audited
+    // again before it may replace the safe baseline.
+    if (
+      activeProfile &&
+      proofResult.status === "SAFE_REWRITE" &&
+      (validated.actionType === "cta" || validated.actionType === "headline")
+    ) {
+      const safeVariant = applyActionAwareSafeVariant({
+        output,
+        actionType: validated.actionType,
+        useCase,
+        outLang,
+      });
+
+      if (normalizeVisibleText(safeVariant) !== normalizeVisibleText(output)) {
+        const variantGuard = applyClaimAwareFactGuard({
+          output: safeVariant,
+          profile: activeProfile,
+          ...flags,
+          outLang,
+        });
+        const verifiedVariant = repairEncodingArtifacts(variantGuard.output);
+
+        if (
+          variantGuard.proof.status === "PASSED" &&
+          normalizeVisibleText(verifiedVariant) === normalizeVisibleText(safeVariant)
+        ) {
+          output = verifiedVariant;
+          safeVariantApplied = true;
+          proofResult = {
+            ...proofResult,
+            quickActionSafeVariantApplied: true,
+            quickActionSafeVariantAction: validated.actionType,
+            finalOutputVerified: true,
+            verifiedFactCount: variantGuard.proof.verifiedFactCount,
+            verifiedBodyFactCount: variantGuard.proof.verifiedBodyFactCount,
+            matchedFactIds: variantGuard.proof.matchedFactIds,
+            safeOutputVerifiedClaimCount: variantGuard.proof.verifiedClaimCount,
+            safeOutputRejectedClaimCount: 0,
+          };
+        }
+      }
+    }
+
+    let changeAssessment = assessQuickActionChange({
+      sourceOutput: validated.currentOutput,
+      candidateOutput: output,
+      actionType: validated.actionType,
+    });
+
+    let actionApplied = changeAssessment.changed;
+    let noOpReason = changeAssessment.noOpReason;
+
+    // A SAFE_REWRITE for tone cannot honestly claim that the requested target
+    // tone survived the safety rebuild. Preserve the existing Canvas text instead
+    // of showing a fake successful transformation. CTA/headline are treated the
+    // same way when their verified fact-only variant could not be produced.
+    if (proofResult.status === "SAFE_REWRITE") {
+      if (validated.actionType === "tone") {
+        actionApplied = false;
+        changeAssessment = { changed: false, noOpReason: "action_not_safely_applicable" };
+        noOpReason = changeAssessment.noOpReason;
+      }
+      if (
+        (validated.actionType === "cta" || validated.actionType === "headline") &&
+        !safeVariantApplied
+      ) {
+        actionApplied = false;
+        changeAssessment = { changed: false, noOpReason: "action_not_safely_applicable" };
+        noOpReason = changeAssessment.noOpReason;
+      }
+    }
+
+    if (!changeAssessment.changed) {
+      // No visible/meaningful action result: keep the exact Canvas text the user
+      // already had. The API still reports that a transform attempt was audited.
+      output = validated.currentOutput;
+      actionApplied = false;
+    }
 
     res.setHeader(
       "x-gle-proof-status",
@@ -3513,6 +3599,10 @@ app.post("/api/transform", async (req, res) => {
         version: QUICK_ACTIONS_VERSION,
         actionType: validated.actionType,
         targetTone: validated.actionType === "tone" ? targetTone : null,
+        changed: !!changeAssessment.changed,
+        actionApplied: !!actionApplied,
+        noOpReason: changeAssessment.changed ? null : noOpReason || "no_visible_change",
+        safeVariantApplied: !!safeVariantApplied,
       },
       grounding: {
         mode: "light-v1",
