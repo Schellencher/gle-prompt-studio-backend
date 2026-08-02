@@ -5,6 +5,7 @@ const { createAccountProfile } = require("../src/profiles");
 const {
   PROOF_MODE,
   buildNaturalFactOutput,
+  buildLandingFactOutput,
   auditOutputAgainstFacts,
   applyClaimAwareFactGuard,
 } = require("../src/fact-guard");
@@ -130,4 +131,59 @@ assert.equal(unsupportedUseCase.proof.status, "NOT_VERIFIED");
 assert.equal(unsupportedUseCase.proof.reason, "use_case_not_yet_supported");
 assert.equal(unsupportedUseCase.output, "LinkedIn output");
 
-console.log("GLE Fact Guard v2 test passed");
+
+
+const safeLanding = buildLandingFactOutput(profile, { outLang: "DE" });
+assert(safeLanding.startsWith("1) TrailFold 12"));
+assert(safeLanding.includes("2) TrailFold 12 bietet"));
+assert(safeLanding.includes("3) Bulletpoints:"));
+assert(safeLanding.includes("- Anschluss: USB-C"));
+assert(safeLanding.includes("- Lichtfarbe: warmweiß"));
+assert(safeLanding.includes("- Akkulaufzeit: bis zu 12 Stunden"));
+assert(safeLanding.includes("4) CTA-Zeile: Details ansehen."));
+assert(safeLanding.includes("5) Mini-FAQ:"));
+assert(!safeLanding.toLowerCase().includes("schnell"));
+assert(!safeLanding.toLowerCase().includes("robust"));
+
+const safeLandingAudit = auditOutputAgainstFacts(safeLanding, profile);
+assert.equal(safeLandingAudit.rejectedClaimCount, 0);
+assert.equal(safeLandingAudit.completeFactCoverage, true);
+assert.equal(safeLandingAudit.verifiedFactCount, 4);
+
+const cleanLandingModelOutput = `1) TrailFold 12\n2) TrailFold 12 bietet einen USB-C-Anschluss, warmweißes Licht und eine Akkulaufzeit von bis zu 12 Stunden.\n3) Bulletpoints:\n- Produktname: TrailFold 12\n- Anschluss: USB-C\n- Lichtfarbe: warmweiß\n- Akkulaufzeit: bis zu 12 Stunden\n4) CTA-Zeile: Details ansehen.\n5) Mini-FAQ:\n- Frage: Welche Angabe ist für Anschluss freigegeben?\n  Antwort: Anschluss: USB-C.\n- Frage: Welche Angabe ist für Lichtfarbe freigegeben?\n  Antwort: Lichtfarbe: warmweiß.\n- Frage: Welche Angabe ist für Akkulaufzeit freigegeben?\n  Antwort: Akkulaufzeit: bis zu 12 Stunden.`;
+const landingPassed = applyClaimAwareFactGuard({
+  output: cleanLandingModelOutput,
+  profile,
+  isProductDescription: false,
+  isLandingPage: true,
+  outLang: "DE",
+});
+assert.equal(landingPassed.proof.status, "PASSED");
+assert.equal(landingPassed.proof.useCaseScope, "landingpage_ad_copy");
+assert.equal(landingPassed.proof.rejectedClaimCount, 0);
+assert.equal(landingPassed.proof.verifiedFactCount, 4);
+assert.equal(landingPassed.proof.safeOutputApplied, false);
+assert.equal(landingPassed.output, cleanLandingModelOutput);
+
+const hallucinatedLanding = `1) TrailFold 12 – die perfekte Campinglampe\n2) Robuste Outdoor-Lampe mit schnellem USB-C-Laden und 12 Stunden Akkulaufzeit.\n3) Bulletpoints:\n- Wasserdicht für jedes Wetter\n- USB-C Schnellladen\n- Warmweißes Licht\n- Bis zu 12 Stunden Akkulaufzeit\n- Leicht und kompakt\n4) CTA-Zeile: Jetzt kaufen.\n5) Mini-FAQ:\n- Frage: Ist sie wasserdicht?\n  Antwort: Ja, sie ist für jedes Wetter geeignet.`;
+const landingRewritten = applyClaimAwareFactGuard({
+  output: hallucinatedLanding,
+  profile,
+  isProductDescription: false,
+  isLandingPage: true,
+  outLang: "DE",
+});
+assert.equal(landingRewritten.proof.status, "SAFE_REWRITE");
+assert.equal(landingRewritten.proof.action, "safe_landing_rewrite");
+assert.equal(landingRewritten.proof.useCaseScope, "landingpage_ad_copy");
+assert.equal(landingRewritten.proof.safeOutputApplied, true);
+assert.equal(landingRewritten.proof.humanReviewRequired, false);
+assert.equal(landingRewritten.proof.finalOutputVerified, true);
+assert.equal(landingRewritten.proof.verifiedFactCount, 4);
+assert.equal(landingRewritten.output, safeLanding);
+assert(!landingRewritten.output.toLowerCase().includes("wasserdicht"));
+assert(!landingRewritten.output.toLowerCase().includes("perfekt"));
+assert(!landingRewritten.output.toLowerCase().includes("robust"));
+assert(!landingRewritten.output.toLowerCase().includes("schnellladen"));
+
+console.log("GLE Fact Guard v2 Landingpage extension test passed");

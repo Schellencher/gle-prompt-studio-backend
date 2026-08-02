@@ -142,6 +142,51 @@ function buildNaturalFactOutput(profile, { outLang = "DE" } = {}) {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+
+function buildLandingFactOutput(profile, { outLang = "DE" } = {}) {
+  const facts = approvedFacts(profile);
+  if (!facts.length) return "";
+
+  const title = pickTitle(profile, facts);
+  const headline = title || (isEnglish(outLang) ? "Approved details" : "Freigegebene Angaben");
+  const bodyFacts = facts.filter((fact) => !isTitleFact(fact));
+  const phraseFn = isEnglish(outLang) ? enFactPhrase : deFactPhrase;
+  const summaryFacts = bodyFacts.length ? bodyFacts : facts;
+  const summary = joinPhrases(summaryFacts.map(phraseFn), outLang);
+
+  const labels = isEnglish(outLang)
+    ? { bullets: "Bullet points", cta: "CTA line", faq: "Mini FAQ", q: "Question", a: "Answer" }
+    : { bullets: "Bulletpoints", cta: "CTA-Zeile", faq: "Mini-FAQ", q: "Frage", a: "Antwort" };
+
+  const lines = [
+    `1) ${headline}`,
+    `2) ${title || (isEnglish(outLang) ? "The product" : "Das Produkt")} ${
+      isEnglish(outLang) ? "offers" : "bietet"
+    } ${summary}.`,
+    `3) ${labels.bullets}:`,
+    ...facts.map((fact) => `- ${fact.label}: ${fact.value}`),
+    `4) ${labels.cta}: ${isEnglish(outLang) ? "View details." : "Details ansehen."}`,
+    `5) ${labels.faq}:`,
+  ];
+
+  const faqFacts = (bodyFacts.length ? bodyFacts : facts).slice(0, 3);
+  for (const fact of faqFacts) {
+    if (isEnglish(outLang)) {
+      lines.push(
+        `- ${labels.q}: What is the approved value for ${fact.label}?`,
+        `  ${labels.a}: ${fact.label}: ${fact.value}.`,
+      );
+    } else {
+      lines.push(
+        `- ${labels.q}: Welche Angabe ist für ${fact.label} freigegeben?`,
+        `  ${labels.a}: ${fact.label}: ${fact.value}.`,
+      );
+    }
+  }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // Kept as a compatibility export for tests/tools that still reference the v1 name.
 function buildFactOnlyOutput(profile, options = {}) {
   return buildNaturalFactOutput(profile, options);
@@ -153,7 +198,7 @@ const SAFE_GLUE = new Set([
   "und", "oder", "mit", "von", "zu", "bis", "fuer", "im", "in", "am", "an", "auf", "als",
   "ist", "sind", "hat", "haben", "bietet", "bieten", "verfuegt", "verfuegen", "ueber",
   "umfasst", "enthalten", "enthaelt", "betragt", "betraegt", "liegt", "bei", "erreicht",
-  "produkt", "modell", "details", "ansehen", "freigegeben", "freigegebene", "fakten",
+  "produkt", "modell", "details", "ansehen", "freigegeben", "freigegebene", "angaben", "fakten",
   // EN grammatical glue / neutral verbs
   "the", "a", "an", "and", "or", "with", "of", "to", "up", "for", "in", "on", "as",
   "is", "are", "has", "have", "offers", "offer", "features", "feature", "includes", "include",
@@ -214,17 +259,34 @@ function technicalCodes(value) {
   return Array.from(new Set(codes));
 }
 
+
+function isStructuralLandingLine(value) {
+  const line = clean(value)
+    .replace(/^\d+[.)]\s*/, "")
+    .trim();
+  return /^(bulletpoints|bullet points|mini[- ]?faq)\s*:?$/i.test(line);
+}
+
+function isQuestionLine(value) {
+  const line = clean(value)
+    .replace(/^\d+[.)]\s*/, "")
+    .replace(/^[-•*]+\s*/, "")
+    .trim();
+  return /^(frage|question)\s*:/i.test(line);
+}
+
 function stripClaimPrefix(value) {
   return clean(value)
     .replace(/^[-•*]+\s*/, "")
     .replace(/^\d+[.)]\s*/, "")
-    .replace(/^(frage|antwort|question|answer|cta(?: zeile)?|mini faq)\s*:\s*/i, "")
+    .replace(/^(frage|antwort|question|answer|cta(?:[- ]?zeile)?|mini faq)\s*:\s*/i, "")
     .trim();
 }
 
 function splitClaims(output) {
   const out = [];
   for (const rawLine of clean(output).split(/\r?\n/)) {
+    if (isStructuralLandingLine(rawLine) || isQuestionLine(rawLine)) continue;
     const line = stripClaimPrefix(rawLine);
     if (!line) continue;
 
@@ -351,11 +413,14 @@ function baseProof(profile, facts) {
   };
 }
 
-function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLang } = {}) {
+function applyClaimAwareFactGuard({ output, profile, isProductDescription, isLandingPage, outLang } = {}) {
   const facts = approvedFacts(profile);
   const base = baseProof(profile, facts);
 
-  if (!profile || !isProductDescription || !facts.length) {
+  const supportedUseCase = !!isProductDescription || !!isLandingPage;
+  const useCaseScope = isLandingPage ? "landingpage_ad_copy" : "product_description";
+
+  if (!profile || !supportedUseCase || !facts.length) {
     return {
       output: clean(output),
       proof: {
@@ -364,7 +429,7 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLa
         applied: false,
         reason: !profile
           ? "no_profile"
-          : !isProductDescription
+          : !supportedUseCase
             ? "use_case_not_yet_supported"
             : "no_approved_proof_facts",
         verifiedFactCount: 0,
@@ -385,6 +450,7 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLa
         status: "PASSED",
         applied: true,
         action: "model_output_verified",
+        useCaseScope,
         scope: "selected_profile_facts_claim_audit",
         verifiedFactCount: modelAudit.verifiedFactCount,
         matchedFactIds: modelAudit.matchedFactIds,
@@ -400,7 +466,9 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLa
   // natural-language renderer built only from approved facts, while keeping the
   // SAFE_REWRITE means the unverified model draft was discarded and the final output
   // was deterministically rebuilt only from approved Proof Facts. Human review is not required.
-  const safeOutput = buildNaturalFactOutput(profile, { outLang });
+  const safeOutput = isLandingPage
+    ? buildLandingFactOutput(profile, { outLang })
+    : buildNaturalFactOutput(profile, { outLang });
   const safeAudit = auditOutputAgainstFacts(safeOutput, profile);
   const reason = modelAudit.rejectedClaimCount > 0
     ? "unsupported_claims_detected"
@@ -412,7 +480,8 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLa
       ...base,
       status: "SAFE_REWRITE",
       applied: true,
-      action: "safe_natural_rewrite",
+      action: isLandingPage ? "safe_landing_rewrite" : "safe_natural_rewrite",
+      useCaseScope,
       humanReviewRequired: false,
       finalOutputVerified: true,
       scope: "selected_profile_facts_claim_audit",
@@ -445,6 +514,7 @@ module.exports = {
   PROOF_MODE,
   approvedFacts,
   buildNaturalFactOutput,
+  buildLandingFactOutput,
   buildFactOnlyOutput,
   splitClaims,
   auditClaim,
