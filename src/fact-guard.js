@@ -398,7 +398,8 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLa
 
   // Do not expose the unverified model draft. V2 replaces it with a deterministic,
   // natural-language renderer built only from approved facts, while keeping the
-  // status yellow so the user can see that the original draft required review.
+  // SAFE_REWRITE means the unverified model draft was discarded and the final output
+  // was deterministically rebuilt only from approved Proof Facts. Human review is not required.
   const safeOutput = buildNaturalFactOutput(profile, { outLang });
   const safeAudit = auditOutputAgainstFacts(safeOutput, profile);
   const reason = modelAudit.rejectedClaimCount > 0
@@ -409,9 +410,11 @@ function applyClaimAwareFactGuard({ output, profile, isProductDescription, outLa
     output: safeOutput,
     proof: {
       ...base,
-      status: "REVIEW_REQUIRED",
+      status: "SAFE_REWRITE",
       applied: true,
       action: "safe_natural_rewrite",
+      humanReviewRequired: false,
+      finalOutputVerified: true,
       scope: "selected_profile_facts_claim_audit",
       reason,
       verifiedFactCount: safeAudit.verifiedFactCount,

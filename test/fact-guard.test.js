@@ -66,12 +66,14 @@ const reviewed = applyClaimAwareFactGuard({
   isProductDescription: true,
   outLang: "DE",
 });
-assert.equal(reviewed.proof.status, "REVIEW_REQUIRED");
+assert.equal(reviewed.proof.status, "SAFE_REWRITE");
 assert.equal(reviewed.proof.mode, PROOF_MODE);
 assert.equal(reviewed.proof.action, "safe_natural_rewrite");
 assert.equal(reviewed.proof.reason, "unsupported_claims_detected");
 assert(reviewed.proof.rejectedClaimCount >= 3);
 assert.equal(reviewed.proof.safeOutputApplied, true);
+assert.equal(reviewed.proof.humanReviewRequired, false);
+assert.equal(reviewed.proof.finalOutputVerified, true);
 assert.equal(reviewed.proof.verifiedFactCount, 4);
 assert.equal(reviewed.output, safe);
 assert(!reviewed.output.toLowerCase().includes("schnell"));
@@ -86,7 +88,7 @@ const wrongConnector = applyClaimAwareFactGuard({
   isProductDescription: true,
   outLang: "DE",
 });
-assert.equal(wrongConnector.proof.status, "REVIEW_REQUIRED");
+assert.equal(wrongConnector.proof.status, "SAFE_REWRITE");
 assert(wrongConnector.proof.rejectedClaimCount >= 1);
 
 const inventedNumber = applyClaimAwareFactGuard({
@@ -95,7 +97,7 @@ const inventedNumber = applyClaimAwareFactGuard({
   isProductDescription: true,
   outLang: "DE",
 });
-assert.equal(inventedNumber.proof.status, "REVIEW_REQUIRED");
+assert.equal(inventedNumber.proof.status, "SAFE_REWRITE");
 assert(inventedNumber.proof.rejectedClaims.some((claim) => claim.reason === "unsupported_number"));
 
 const incomplete = applyClaimAwareFactGuard({
@@ -104,7 +106,7 @@ const incomplete = applyClaimAwareFactGuard({
   isProductDescription: true,
   outLang: "DE",
 });
-assert.equal(incomplete.proof.status, "REVIEW_REQUIRED");
+assert.equal(incomplete.proof.status, "SAFE_REWRITE");
 assert.equal(incomplete.proof.reason, "incomplete_fact_coverage");
 assert.equal(incomplete.output, safe);
 
