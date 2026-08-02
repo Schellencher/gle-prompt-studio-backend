@@ -3017,6 +3017,12 @@ app.post("/api/generate", async (req, res) => {
         .toLowerCase()
         .includes("product description");
 
+    // Preserve provenance for proof auditing. If a profiled Social draft has
+    // the wrong 7-line structure, keep the real model draft for Fact Guard
+    // diagnostics and let Fact Guard produce the native safe rewrite.
+    // The legacy generic topic fallback is only for unprofiled requests.
+    let socialNeedsStructureRewrite = false;
+
     let masterPrompt = isLandingPage
       ? buildLandingpageJsonPromptV2({
           useCase: String(useCase || "").trim(),
@@ -3156,7 +3162,13 @@ app.post("/api/generate", async (req, res) => {
       output = stripMarkdownArtifacts(output);
 
       if (!validateSocialPost7(output) || socialLooksWeak7(output)) {
-        output = buildSocialFallback({ outLang, topic });
+        if (activeProfile) {
+          socialNeedsStructureRewrite = true;
+          res.setHeader("x-gle-social-structure-rewrite", "fact-guard");
+        } else {
+          output = buildSocialFallback({ outLang, topic });
+          res.setHeader("x-gle-social-structure-rewrite", "legacy-fallback");
+        }
       } else {
         output = output
           .trim()
@@ -3314,11 +3326,12 @@ app.post("/api/generate", async (req, res) => {
       }
     }
 
-    // Proof-of-Execution / Fact Guard v2.3 (claim-aware scope):
+    // Proof-of-Execution / Fact Guard (claim-aware scope):
     // All Studio content use-cases are audited against selected approved Proof Facts.
-    // Natural model wording is kept only when every factual claim can be matched and
-    // all approved facts are covered. Otherwise the unsafe draft is withheld and
-    // replaced with a deterministic, use-case-native SAFE REWRITE.
+    // Natural model wording is kept only when every asserted factual claim is supported.
+    // Approved facts are a source pool, not a mandatory checklist. Unsafe drafts or
+    // profiled Social drafts with invalid structure are replaced with a deterministic,
+    // use-case-native SAFE REWRITE without losing the original model-draft diagnostics.
     const guardedResult = applyClaimAwareFactGuard({
       output,
       profile: activeProfile,
@@ -3330,8 +3343,14 @@ app.post("/api/generate", async (req, res) => {
       isBlogArticle,
       isShortVideoScript,
       outLang,
+      forceSafeRewrite: isSocial && !!activeProfile && socialNeedsStructureRewrite,
+      forceSafeRewriteReason: "social_structure_invalid",
     });
     output = guardedResult.output;
+    if (isSocial) {
+      // Header reflects the delivered final output, not the pre-guard draft.
+      res.setHeader("x-gle-social-valid", String(validateSocialPost7(output)));
+    }
     const proofResult = guardedResult.proof;
     res.setHeader("x-gle-proof-status", String(proofResult.status || "NOT_VERIFIED"));
     res.setHeader("x-gle-proof-mode", String(proofResult.mode || "claim-aware-profile-facts-v2"));

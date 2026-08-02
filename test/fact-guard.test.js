@@ -417,6 +417,44 @@ assert.equal(socialPassed.output, safeSocial);
 
 
 
+
+// v2.7.2: structural repair must preserve model-draft provenance.
+const groundedButStructurallyInvalidSocial = applyClaimAwareFactGuard({
+  output: "TrailFold 12 hat einen USB-C-Anschluss.",
+  profile,
+  isSocial: true,
+  outLang: "DE",
+  forceSafeRewrite: true,
+  forceSafeRewriteReason: "social_structure_invalid",
+});
+assert.equal(groundedButStructurallyInvalidSocial.proof.status, "SAFE_REWRITE");
+assert.equal(groundedButStructurallyInvalidSocial.proof.reason, "social_structure_invalid");
+assert.equal(groundedButStructurallyInvalidSocial.proof.forcedSafeRewrite, true);
+assert.deepEqual(groundedButStructurallyInvalidSocial.proof.rewriteTriggers, ["social_structure_invalid"]);
+assert.equal(groundedButStructurallyInvalidSocial.proof.claimCount, 1);
+assert.equal(groundedButStructurallyInvalidSocial.proof.verifiedClaimCount, 1);
+assert.equal(groundedButStructurallyInvalidSocial.proof.rejectedClaimCount, 0);
+assert.equal(groundedButStructurallyInvalidSocial.output, safeSocial);
+assert.equal(groundedButStructurallyInvalidSocial.output.split("\n").length, 7);
+
+const unsafeAndStructurallyInvalidSocial = applyClaimAwareFactGuard({
+  output: "TrailFold 12 ist perfekt fürs Camping.",
+  profile,
+  isSocial: true,
+  outLang: "DE",
+  forceSafeRewrite: true,
+  forceSafeRewriteReason: "social_structure_invalid",
+});
+assert.equal(unsafeAndStructurallyInvalidSocial.proof.status, "SAFE_REWRITE");
+assert.equal(unsafeAndStructurallyInvalidSocial.proof.reason, "unsupported_claims_detected");
+assert.deepEqual(unsafeAndStructurallyInvalidSocial.proof.rewriteTriggers, [
+  "unsupported_claims_detected",
+  "social_structure_invalid",
+]);
+assert.equal(unsafeAndStructurallyInvalidSocial.proof.rejectedClaimCount, 1);
+assert.equal(unsafeAndStructurallyInvalidSocial.proof.rejectionReasonCounts.unsupported_claim_term, 1);
+assert.equal(unsafeAndStructurallyInvalidSocial.output, safeSocial);
+
 // v2.7 Smart Claim Matching --------------------------------------------------
 // Natural factual paraphrases should pass without forcing a SAFE_REWRITE.
 const smartCombined = `TrailFold 12 kombiniert USB-C, warmweißes Licht und eine Akkulaufzeit von bis zu 12 Stunden.`;
@@ -427,7 +465,7 @@ const smartCombinedResult = applyClaimAwareFactGuard({
   outLang: "DE",
 });
 assert.equal(smartCombinedResult.proof.status, "PASSED");
-assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.1-integrity");
+assert.equal(smartCombinedResult.proof.matcherVersion, "smart-v2.7.2-provenance");
 assert.equal(smartCombinedResult.proof.verifiedFactCount, 4);
 assert.equal(smartCombinedResult.proof.verifiedClaimCount, 1);
 assert.equal(smartCombinedResult.proof.rejectedClaimCount, 0);

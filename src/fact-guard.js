@@ -1,7 +1,7 @@
 "use strict";
 
 const PROOF_MODE = "claim-aware-profile-facts-v2";
-const MATCHER_VERSION = "smart-v2.7.1-integrity";
+const MATCHER_VERSION = "smart-v2.7.2-provenance";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -1126,6 +1126,8 @@ function applyClaimAwareFactGuard({
   isBlogArticle,
   isShortVideoScript,
   outLang,
+  forceSafeRewrite = false,
+  forceSafeRewriteReason = "",
 } = {}) {
   const facts = approvedFacts(profile);
   const base = baseProof(profile, facts);
@@ -1165,7 +1167,7 @@ function applyClaimAwareFactGuard({
   // Approved Proof Facts are a source pool, not a mandatory checklist.
   // PASSED means every asserted claim is supported and at least one non-title
   // Proof Fact grounds the output. Omitting unrelated approved facts is allowed.
-  if (modelAudit.rejectedClaimCount === 0 && modelAudit.verifiedBodyFactCount > 0) {
+  if (!forceSafeRewrite && modelAudit.rejectedClaimCount === 0 && modelAudit.verifiedBodyFactCount > 0) {
     return {
       output: clean(output),
       proof: {
@@ -1192,9 +1194,18 @@ function applyClaimAwareFactGuard({
   // output was rebuilt only from approved Proof Facts in the native use-case format.
   const safeOutput = buildSafeOutputForScope(useCaseScope, profile, { outLang });
   const safeAudit = auditOutputAgainstFacts(safeOutput, profile);
+  const normalizedForceReason = clean(forceSafeRewriteReason) || "forced_safe_rewrite";
   const reason = modelAudit.rejectedClaimCount > 0
     ? "unsupported_claims_detected"
-    : "insufficient_fact_grounding";
+    : forceSafeRewrite
+      ? normalizedForceReason
+      : "insufficient_fact_grounding";
+  const rewriteTriggers = [];
+  if (modelAudit.rejectedClaimCount > 0) rewriteTriggers.push("unsupported_claims_detected");
+  if (forceSafeRewrite) rewriteTriggers.push(normalizedForceReason);
+  if (!modelAudit.rejectedClaimCount && !forceSafeRewrite && modelAudit.verifiedBodyFactCount === 0) {
+    rewriteTriggers.push("insufficient_fact_grounding");
+  }
 
   return {
     output: safeOutput,
@@ -1208,6 +1219,8 @@ function applyClaimAwareFactGuard({
       finalOutputVerified: safeAudit.rejectedClaimCount === 0 && safeAudit.verifiedBodyFactCount > 0,
       scope: "selected_profile_facts_claim_audit",
       reason,
+      rewriteTriggers,
+      forcedSafeRewrite: !!forceSafeRewrite,
       verifiedFactCount: safeAudit.verifiedFactCount,
       verifiedBodyFactCount: safeAudit.verifiedBodyFactCount,
       completeFactCoverage: safeAudit.completeFactCoverage,
