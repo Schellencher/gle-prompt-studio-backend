@@ -1,5 +1,7 @@
 "use strict";
 
+const { buildAntiFluffPromptBlock } = require("./anti-fluff");
+
 function cleanLine(value) {
   return String(value ?? "")
     .replace(/[\r\n]+/g, " ")
@@ -50,6 +52,8 @@ Zielsprache: ${languageName}
 Use-Case: ${cleanLine(useCase)}
 Ton: ${cleanLine(tone)}
 
+${buildAntiFluffPromptBlock({ outLang: lang, stage: "landingpage-generate" })}
+
 THEMA / ANGEBOT:
 ${safeTopic || "Keine weiteren Angaben."}
 
@@ -69,9 +73,6 @@ FAKTENREGELN:
 
 STILREGELN:
 - Natürlich, konkret und professionell.
-- Keine Emojis.
-- Keine Meta-Erklärungen.
-- Keine leeren Werbefloskeln.
 - Headline maximal 9 Wörter.
 - Genau 5 Bulletpoints.
 - Genau 3 FAQ-Paare.
@@ -107,6 +108,8 @@ function buildLandingpageJsonRepairPrompt({ badOutput, topic, outLang }) {
   return `
 Wandle den folgenden Inhalt in gültiges JSON um.
 Gib ausschließlich JSON aus. Kein Markdown. Keine Erklärung.
+
+${buildAntiFluffPromptBlock({ outLang: lang, stage: "landingpage-repair" })}
 
 THEMA / ANGEBOT:
 ${safeTopic || (lang === "en" ? "No topic provided." : "Kein Thema angegeben.")}

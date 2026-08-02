@@ -12,7 +12,7 @@
  * - JSON file DB (Render persistent disk friendly via DATA_DIR)
  * - CORS allowlist (studio.getlaunchedge.com + scoped Vercel previews + ENV override)
  * - OpenAI call: Responses API + fallback Chat Completions
- * - Server-side Bouncer: banned stems scan + rewrite passes + hard fail 422
+ * - Central Anti-Fluff policy + server-side Bouncer rewrite passes
  * - CTA normalizer + neutral CTA enforcement + hot-stem sanitizer (NON-social only)
  * - Social Media Post: strict 7-line validator + deterministic fallback
  * - Admin endpoint: set plan PRO/FREE via ADMIN_KEY
@@ -50,6 +50,16 @@ const {
   buildGroundingPromptBlock,
 } = require("./src/generation-context");
 const { applyClaimAwareFactGuard } = require("./src/fact-guard");
+const {
+  ANTI_FLUFF_VERSION,
+  getActiveBannedStems,
+  findStemViolations,
+  buildAntiFluffPromptBlock,
+  buildAntiFluffRepairBlock,
+  normalizeCtaLabel,
+  forceNeutralCTA,
+  hardStripHotStems,
+} = require("./src/anti-fluff");
 const {
   buildLandingpageJsonPrompt: buildLandingpageJsonPromptV2,
   buildLandingpageJsonRepairPrompt,
@@ -602,7 +612,7 @@ function markTrial(account) {
 }
 
 // ===============================
-// BOUNCER v2 â€” server-side quality gate
+// BOUNCER — central Anti-Fluff quality gate
 // ===============================
 const BOUNCER_ENABLED = String(process.env.BOUNCER_ENABLED || "0") === "1";
 const BOUNCER_MAX_PASSES = Math.max(
@@ -610,180 +620,10 @@ const BOUNCER_MAX_PASSES = Math.max(
   Number(process.env.BOUNCER_MAX_PASSES || 0),
 );
 
-const REQUIRED_BANNED_STEMS = [
-  "tutmirleid",
-  "bittegib",
-  "benoetig",
-  "mehrinformation",
-  "ichkann",
-  "imsorry",
-  "cantcomply",
-  "cannotcomply",
-];
+const ACTIVE_BANNED_STEMS = getActiveBannedStems(process.env);
 
-const DEFAULT_BANNED_STEMS = [
-  "optimier",
-  "steiger",
-  "verbesser",
-  "erleb",
-  "profit",
-  "verpass",
-  "chance",
-  "exklus",
-  "konkurrenz",
-  "agentur",
-  "erfolg",
-  "nutz",
-  "vorteil",
-  "vorsp",
-  "sicher",
-  "leader",
-  "luxus",
-  "strateg",
-];
-
-function _normalizeForScan(input) {
-  let s = String(input || "").toLowerCase();
-  s = s
-    .replace(/Ã¤/g, "ae")
-    .replace(/Ã¶/g, "oe")
-    .replace(/Ã¼/g, "ue")
-    .replace(/ÃŸ/g, "ss");
-  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  s = s
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-  return s;
-}
-
-function _splitEnvStems(envVal) {
-  const raw = String(envVal || "").trim();
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function _dedupeKeepOrder(arr) {
-  const seen = new Set();
-  const out = [];
-  for (const x of arr) {
-    const key = String(x || "").trim();
-    if (!key) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-  }
-  return out;
-}
-
-function getActiveBannedStems() {
-  const fromEnv = _splitEnvStems(process.env.BOUNCER_BANNED_STEMS);
-  const base = fromEnv.length ? fromEnv : DEFAULT_BANNED_STEMS;
-  const combined = _dedupeKeepOrder([...base, ...REQUIRED_BANNED_STEMS]);
-  return _dedupeKeepOrder(
-    combined
-      .map((stem) => _normalizeForScan(stem).replace(/\s+/g, ""))
-      .filter(Boolean),
-  );
-}
-
-const ACTIVE_BANNED_STEMS = getActiveBannedStems();
-
-function findStemViolations(text, stems = ACTIVE_BANNED_STEMS) {
-  const hay = _normalizeForScan(text);
-  if (!hay) return [];
-  const hayCompact = hay.replace(/\s+/g, "");
-  const hits = [];
-  for (const stemRaw of stems) {
-    const stem = _normalizeForScan(stemRaw).replace(/\s+/g, "");
-    if (!stem) continue;
-    if (hayCompact.includes(stem)) hits.push(stem);
-  }
-  return _dedupeKeepOrder(hits);
-}
-
-// --------------------
-// CTA + Sanitizer (last mile) â€” NON-social only
-// --------------------
-function detectCtaLabelFromExtra(extra) {
-  const s = String(extra || "");
-  if (/CTA-Zeile/i.test(s)) return "CTA-Zeile";
-  if (/CTA\s*:/i.test(s)) return "CTA";
-  return null;
-}
-
-function normalizeCtaLabel(output, extra) {
-  const want = detectCtaLabelFromExtra(extra);
-  if (!want) return String(output || "");
-
-  return String(output || "")
-    .split(/\r?\n/)
-    .map((line) => {
-      const m = line.match(/^(\s*(?:\d+\)\s*)?)(CTA(?:-Zeile)?\s*:)(.*)$/i);
-      if (!m) return line;
-      return `${m[1]}${want}:${m[3] || ""}`;
-    })
-    .join("\n");
-}
-
-function forceNeutralCTA(output, extra) {
-  const allowed = [
-    "Zur Warteliste.",
-    "Early Access: Eintragen.",
-    "Warteliste Ã¶ffnen.",
-  ];
-  const chosen = allowed[0];
-
-  const want = detectCtaLabelFromExtra(extra);
-  const out = String(output || "")
-    .split(/\r?\n/)
-    .map((line) => {
-      const m = line.match(/^(\s*(?:\d+\)\s*)?)(CTA(?:-Zeile)?\s*:)\s*(.*)$/i);
-      if (!m) return line;
-      const label = want ? `${want}:` : m[2];
-      return `${m[1]}${label} ${chosen}`;
-    })
-    .join("\n");
-
-  const expects =
-    /CTA-Zeile/i.test(String(extra || "")) ||
-    /CTA\s*:/i.test(String(extra || ""));
-  const hasCta = /(^|\n)\s*(\d+\)\s*)?CTA(?:-Zeile)?\s*:/i.test(out);
-  if (expects && !hasCta) {
-    const label = want ? `${want}:` : "CTA:";
-    return `${out}\n\n${label} ${chosen}`;
-  }
-  return out;
-}
-
-function hardStripHotStems(output) {
-  let s = String(output || "");
-
-  const repl = [
-    [/\b(nutz\w*)\b/gi, "verwenden"],
-    [/\b(vorsprung\w*)\b/gi, "klarer Schritt nach vorn"],
-    [/\b(vorsp\w*)\b/gi, "klarer Schritt nach vorn"],
-    [/\b(sicher\w*)\b/gi, "jetzt"],
-    [/\b(optimier\w*|steiger\w*|verbesser\w*)\b/gi, "reduzieren"],
-    [/\b(erfolg\w*)\b/gi, "Ergebnis"],
-    [
-      /\b(chanc\w*|verpass\w*|profit\w*|exklus\w*|konkurrenz\w*|agentur\w*|leader\w*|luxus\w*|strateg\w*)\b/gi,
-      "",
-    ],
-    [/\b(hochwertig\w*|blitzschnell\w*|revolution\w*|premium\w*)\b/gi, ""],
-  ];
-
-  for (const [rx, to] of repl) s = s.replace(rx, to);
-
-  s = s
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return s;
-}
+// CTA normalization + conservative last-mile cleanup are provided by
+// src/anti-fluff.js so Generate, Repair and future Quick Actions share one policy.
 
 // --------------------
 // OpenAI call (Responses API + fallback)
@@ -943,45 +783,36 @@ function buildMasterPrompt({ useCase, tone, topic, extra, outLang }) {
 
   return `
 Du bist "GLE Prompt Studio".
-Du lieferst FERTIGEN Content. Kein Meta, keine RÃ¼ckfragen, keine Entschuldigungen.
 
 Zielsprache: ${lang}
 Use-Case: ${uc}
 Ton: ${t}
 
-HARTE REGELN:
-- Keine EinleitungssÃ¤tze ("Hier ist...", "Gerne...", "Es tut mir leid...").
-- Keine Emojis.
-- Keine Buzzwords/Floskeln wie "hochwertig", "ohne Aufwand", "Premium", "revolutionÃ¤r".
-- Keine leeren Ãœberschriften, keine leeren Nummernpunkte, keine leeren Bulletpoints.
-- Jede nummerierte Zeile muss Inhalt haben.
-- Wenn ein Format Punkt 1), 2), 3) usw. verlangt, muss jeder Punkt vollstÃ¤ndig ausgefÃ¼llt sein.
-- CTA nur einmal ausgeben.
-- Wenn im Format bereits "CTA-Zeile" verlangt wird, dann KEINE zusÃ¤tzliche CTA am Ende anhÃ¤ngen.
-- CTA neutral halten, z.B. "Mehr erfahren.", "Details ansehen.", "Kontakt aufnehmen."
-- FAQ sauber schreiben: Frage und Antwort jeweils vollstÃ¤ndig, keine halben Zeilen.
-- Schreibe konkret und in einfachen Worten. Nenne Zielgruppe, Nutzen oder Ergebnis nur, wenn diese Angaben vom Nutzer oder in freigegebenen Fakten belegt sind.
-- Ausgabe: nur der finale Content.
+${buildAntiFluffPromptBlock({ outLang: lang, stage: "generate" })}
 
-QUALITÃ„TSREGELN:
-- Kein Platzhaltertext.
-- Keine technischen Begriffe wie BYOK, Server-Key, Tokens, Modellname, GPT, API.
-- Keine SÃ¤tze Ã¼ber KI oder das Tool selbst, auÃŸer das Thema verlangt es ausdrÃ¼cklich.
-- Kein "Link in Bio".
-- Kein doppelter CTA.
-- Wenn der Nutzer ein exaktes Format vorgibt, halte dieses Format ein und fÃ¼lle jeden Punkt vollstÃ¤ndig.
+STRUKTURREGELN:
+- Keine leeren Überschriften, keine leeren Nummernpunkte, keine leeren Bulletpoints.
+- Jede nummerierte Zeile muss Inhalt haben.
+- Wenn ein Format Punkt 1), 2), 3) usw. verlangt, muss jeder Punkt vollständig ausgefüllt sein.
+- CTA nur einmal ausgeben.
+- Wenn im Format bereits "CTA-Zeile" verlangt wird, keine zusätzliche CTA am Ende anhängen.
+- FAQ sauber schreiben: Frage und Antwort jeweils vollständig, keine halben Zeilen.
+- Wenn der Nutzer ein exaktes Format vorgibt, dieses Format vollständig einhalten.
+
+FAKTENREGELN:
+- Schreibe konkret und in einfachen Worten. Nenne Zielgruppe, Nutzen oder Ergebnis nur, wenn diese Angaben vom Nutzer oder in freigegebenen Fakten belegt sind.
 - Erfinde keine Marken, Produktnamen, Zielgruppen, Preise, Verfuegbarkeiten, Studien, Quellen oder Leistungsversprechen, die nicht in THEMA oder FORMAT / Anforderungen stehen.
 
 THEMA:
 ${cleanTopic || "(kein Thema angegeben)"}
 
-FORMAT / Anforderungen (exakt einhalten und vollstÃ¤ndig ausfÃ¼llen):
+FORMAT / Anforderungen (exakt einhalten und vollständig ausfüllen):
 ${cleanExtra || "(kein Format vorgegeben)"}
 `.trim();
 }
 
 // --------------------
-// Repair Prompt (single source of truth)
+// Repair Prompt — Anti-Fluff policy comes from src/anti-fluff.js
 // --------------------
 function buildRepairPrompt({
   badOutput,
@@ -993,14 +824,14 @@ function buildRepairPrompt({
   outLang,
 }) {
   const lang = String(outLang || "de").toLowerCase() === "en" ? "EN" : "DE";
-  const bannedAll =
-    Array.isArray(ACTIVE_BANNED_STEMS) && ACTIVE_BANNED_STEMS.length
-      ? ACTIVE_BANNED_STEMS.join(", ")
-      : "";
-  const hitList = Array.isArray(hits) && hits.length ? hits.join(", ") : "";
-
-  // Social Media Post = strict 7 lines
   const repairUseCaseNorm = String(useCase || "").trim().toLowerCase();
+  const antiFluffRepair = buildAntiFluffRepairBlock({
+    outLang: lang,
+    hits,
+    activeBannedStems: ACTIVE_BANNED_STEMS,
+  });
+
+  // Social Media Post = strict 7 lines.
   if (
     (repairUseCaseNorm.includes("social") && repairUseCaseNorm.includes("post")) ||
     repairUseCaseNorm === "social media post"
@@ -1008,8 +839,9 @@ function buildRepairPrompt({
     return `
 You are a strict formatter AND grounded copy editor.
 
+${antiFluffRepair}
+
 Rewrite the text below completely new if needed.
-Remove banned word stems.
 Keep only meaning that is supported by THEMA / REQUIREMENTS / approved profile facts.
 DO NOT reuse unsafe phrases directly.
 
@@ -1021,9 +853,6 @@ ${topic}
 
 REQUIREMENTS / GROUNDING:
 ${extra || "(none)"}
-
-BANNED STEMS (must NOT appear):
-${bannedAll || "(none)"}
 
 REQUIRED STRUCTURE (EXACTLY 7 NON-EMPTY LINES):
 Line 1: Neutral hook. No unsupported benefit, suitability, use-case or hype claim.
@@ -1050,28 +879,24 @@ ${String(badOutput || "").slice(0, 2000)}
 `.trim();
   }
 
-  // Default repair for other use-cases
   return `
-Du bist strenger Copy-Editor. Du lieferst FERTIGEN Content â€“ kein Meta, keine Entschuldigungen.
+Du bist ein strenger Copy-Editor. Liefere ausschließlich den fertigen überarbeiteten Content.
+
 Zielsprache: ${lang}
 Use-Case: ${useCase}
 Ton: ${tone}
 Thema: ${topic}
 
-QUALITY GATE (hart):
-1) Schreibe KOMPLETT NEU. Nicht umformulieren, nichts wiederverwenden.
-2) Keine EinleitungssÃ¤tze, keine ErklÃ¤rungen, kein â€œHier istâ€¦â€.
-3) Keine Entschuldigungen / kein â€œmir fehlen Infosâ€.
-4) Keine Floskeln & kein Marketing-Pathos. Kurz, klar, konkret.
-5) Keine Sie-Ansprache. Nutze â€œduâ€ ODER neutral ohne Pronomen.
-6) VERBOTEN: In deiner finalen Antwort darf KEIN Wortteil aus dieser Liste vorkommen:
-${bannedAll || "(leer)"}
-7) Treffer im letzten Output waren: ${hitList || "(keine)"} â€” diese mÃ¼ssen weg.
-8) CTA neutral halten. Kein Imperativ.
-9) Wenn ein verbotener Stamm vorkommt: komplett neu schreiben. Nicht erwÃ¤hnen.
+${antiFluffRepair}
+
+REPARATURREGELN:
+- Bei Bedarf komplett neu schreiben statt problematische Satzteile mechanisch umzubauen.
+- Grounding und freigegebene Fakten unverändert respektieren.
+- Keine neuen Fakten, Vorteile, Zielgruppen, Preise, Studien oder Leistungsversprechen ergänzen.
+- Gewünschte Anrede und Tonalität beibehalten.
 
 FORMAT / Anforderungen (exakt einhalten):
-${extra}
+${extra || "(kein Format vorgegeben)"}
 
 Alter Output (nur zur Analyse, NICHT wiederverwenden):
 """
@@ -2366,6 +2191,7 @@ app.get("/api/health", (req, res) => {
       enabled: BOUNCER_ENABLED,
       maxPasses: BOUNCER_MAX_PASSES,
       stemsCount: ACTIVE_BANNED_STEMS.length,
+      antiFluffVersion: ANTI_FLUFF_VERSION,
     },
     allowedOrigins: ALLOWED_ORIGINS,
     vercelProjectSlug: VERCEL_PROJECT_SLUG,
@@ -3208,7 +3034,7 @@ app.post("/api/generate", async (req, res) => {
       // sonst entstehen kaputte SÃ¤tze wie "Was kostet die verwenden?"
       if (!isLandingPage) {
         output = normalizeCtaLabel(output, extra);
-        output = forceNeutralCTA(output, extra);
+        output = forceNeutralCTA(output, extra, outLang);
         output = hardStripHotStems(output);
       }
     }
@@ -3372,6 +3198,7 @@ app.post("/api/generate", async (req, res) => {
       res.setHeader("x-gle-social-valid", String(validateSocialPost7(output)));
     }
     const proofResult = guardedResult.proof;
+    res.setHeader("x-gle-anti-fluff", ANTI_FLUFF_VERSION);
     res.setHeader("x-gle-proof-status", String(proofResult.status || "NOT_VERIFIED"));
     res.setHeader("x-gle-proof-mode", String(proofResult.mode || "claim-aware-profile-facts-v2"));
 
