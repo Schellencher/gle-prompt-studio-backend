@@ -140,15 +140,15 @@ assert.equal(unsupportedUseCase.output, "LinkedIn output");
 
 const safeLanding = buildLandingFactOutput(profile, { outLang: "DE" });
 assert(safeLanding.startsWith("TrailFold 12"));
-assert(safeLanding.includes("zentralen Produktangaben auf einen Blick"));
+assert(safeLanding.includes("TrailFold 12 bietet einen USB-C-Anschluss"));
 assert(safeLanding.includes("Produktdetails"));
-assert(safeLanding.includes("- USB-C-Anschluss"));
-assert(safeLanding.includes("- Warmweißes Licht"));
-assert(safeLanding.includes("- Akkulaufzeit bis zu 12 Stunden"));
-assert(safeLanding.includes("Details zu TrailFold 12 ansehen."));
+assert(safeLanding.includes("• USB-C-Anschluss"));
+assert(safeLanding.includes("• Warmweißes Licht"));
+assert(safeLanding.includes("• Akkulaufzeit bis zu 12 Stunden"));
+assert(safeLanding.includes("TrailFold 12 im Detail ansehen."));
 assert(safeLanding.includes("FAQ"));
 assert(safeLanding.includes("Welchen Anschluss hat TrailFold 12?"));
-assert(safeLanding.includes("Welche Lichtfarbe bietet TrailFold 12?"));
+assert(safeLanding.includes("Welche Lichtfarbe hat TrailFold 12?"));
 assert(safeLanding.includes("Wie lange beträgt die Akkulaufzeit?"));
 assert(!safeLanding.includes("CTA-Zeile"));
 assert(!safeLanding.includes("Bulletpoints:"));
@@ -224,8 +224,8 @@ assert(safeSocial.includes("TrailFold 12"));
 assert(safeSocial.includes("USB-C"));
 assert(safeSocial.includes("warmweiß"));
 assert(safeSocial.includes("bis zu 12 Stunden"));
-assert(safeSocial.includes("Mehr zu TrailFold 12:"));
-assert(safeSocial.endsWith("Details ansehen."));
+assert(safeSocial.includes("Welches Detail ist für dich am wichtigsten?"));
+assert(safeSocial.endsWith("Details zu TrailFold 12 ansehen."));
 const safeSocialAudit = auditOutputAgainstFacts(safeSocial, profile);
 assert.equal(safeSocialAudit.rejectedClaimCount, 0);
 assert.equal(safeSocialAudit.completeFactCoverage, true);
@@ -252,8 +252,8 @@ const safeLinkedIn = buildLinkedInFactOutput(profile, { outLang: "DE" });
 const safeLinkedInAudit = auditOutputAgainstFacts(safeLinkedIn, profile);
 assert.equal(safeLinkedInAudit.rejectedClaimCount, 0);
 assert.equal(safeLinkedInAudit.completeFactCoverage, true);
-assert(safeLinkedIn.includes("Was sind die zentralen Produktangaben?"));
-assert(safeLinkedIn.includes("an einer Stelle zusammengefasst"));
+assert(safeLinkedIn.includes("TrailFold 12: Produktdetails im Überblick"));
+assert(safeLinkedIn.includes("Welches dieser Details ist für dich am wichtigsten?"));
 const badLinkedIn = `TrailFold 12 – Produktbeschreibung
 
 1) Produktname: TrailFold 12
@@ -321,9 +321,9 @@ const safeBlog = buildBlogFactOutput(profile, { outLang: "DE" });
 const safeBlogAudit = auditOutputAgainstFacts(safeBlog, profile);
 assert.equal(safeBlogAudit.rejectedClaimCount, 0);
 assert.equal(safeBlogAudit.completeFactCoverage, true);
-assert(safeBlog.includes("Produktangaben im Überblick"));
-assert(safeBlog.includes("Im Detail"));
-assert(safeBlog.includes("Kurz zusammengefasst"));
+assert(safeBlog.includes("Produktdetails im Überblick"));
+assert(safeBlog.includes("USB-C-Anschluss\nTrailFold 12 hat einen USB-C-Anschluss."));
+assert(safeBlog.includes("Fazit"));
 const badBlog = `Produktbeschreibung: TrailFold 12
 
 TrailFold 12 ist ein vielseitiges Outdoor-Produkt, das für verschiedene Anwendungen konzipiert wurde.
@@ -346,9 +346,9 @@ const safeVideoAudit = auditOutputAgainstFacts(safeVideo, profile);
 assert.equal(safeVideoAudit.rejectedClaimCount, 0);
 assert.equal(safeVideoAudit.completeFactCoverage, true);
 assert(safeVideo.includes("HOOK"));
-assert(safeVideo.includes("SZENE 1"));
-assert(safeVideo.includes("Sprecher:"));
-assert(safeVideo.includes("OUTRO"));
+assert(safeVideo.includes("SZENE 1 · 2–5 SEK."));
+assert(safeVideo.includes("Sprecher: Das ist TrailFold 12."));
+assert(safeVideo.includes("OUTRO · 11–13 SEK."));
 assert(!safeVideo.includes("CTA-Zeile:"));
 const badVideo = `Produktbeschreibung für TrailFold 12
 
@@ -369,7 +369,7 @@ const videoRewritten = applyClaimAwareFactGuard({
 assertSafeRewriteResult(videoRewritten, "short_video_script", "safe_video_rewrite");
 assert.equal(videoRewritten.output, safeVideo);
 
-// v2.4 quality sweep: native safe outputs stay clean, distinct and customer-facing.
+// v2.5 professional quality sweep: native safe outputs stay clean, distinct and production-ready.
 for (const output of [safe, safeLanding, safeSocial, safeLinkedIn, safeEmail, safeBlog, safeVideo]) {
   const lower = output.toLowerCase();
   assert(!lower.includes("freigegeben"));
@@ -379,8 +379,13 @@ for (const output of [safe, safeLanding, safeSocial, safeLinkedIn, safeEmail, sa
   assert(!lower.includes("bulletpoints:"));
   assert(!lower.includes("mini-faq"));
 }
-assert(safeEmail.includes("hier findest du die zentralen Angaben zu TrailFold 12:"));
-assert(safeVideo.includes("Sprecher: Drei Produktangaben auf einen Blick."));
+assert(safeEmail.includes("hier sind die Produktdetails zu TrailFold 12:"));
+assert(safeVideo.includes("Bild: USB-C-Anschluss im Detail."));
+assert(safeVideo.includes("Bild: Warmweißes Licht im Fokus."));
+assert(safeVideo.includes("Sprecher: Details zu TrailFold 12 ansehen."));
+assert(safeBlog.includes("USB-C-Anschluss, Warmweißes Licht, Akkulaufzeit bis zu 12 Stunden – das sind die zentralen Produktangaben zu TrailFold 12."));
+assert(!safeEmail.includes("Produktbeschreibung:"));
+assert(!safeLinkedIn.includes("1)"));
 
 // Clean native output is still allowed through unchanged for the newly supported scopes.
 const socialPassed = applyClaimAwareFactGuard({
@@ -393,4 +398,4 @@ assert.equal(socialPassed.proof.status, "PASSED");
 assert.equal(socialPassed.output, safeSocial);
 
 
-console.log("GLE Fact Guard v2.4 full Studio natural safe rewrite test passed");
+console.log("GLE Fact Guard v2.5 professional safe rewrite test passed");
