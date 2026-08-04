@@ -4,7 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8").replace(/\r\n/g, "\n");
 
 const generateStart = source.indexOf('app.post("/api/generate"');
 assert.ok(generateStart >= 0, "generate route missing");

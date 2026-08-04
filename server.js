@@ -76,6 +76,14 @@ const {
   assessQuickActionChange,
   applyActionAwareSafeVariant,
 } = require("./src/quick-actions");
+const {
+  EXECUTION_PIPELINE_VERSION,
+  PipelineError,
+  validatePipelineInput,
+  getPipelineSteps,
+  getPipelineUsageCost,
+  buildPipelineStepExtra,
+} = require("./src/execution-pipeline");
 
 const betaAccess = createBetaAccessControl(process.env);
 
@@ -538,13 +546,22 @@ function computeCancelAt(account) {
   return c > 0 ? c : 0;
 }
 
-function enforceQuota(account, wantsBoost, shouldCountUsage = true) {
+function enforceQuota(
+  account,
+  wantsBoost,
+  shouldCountUsage = true,
+  usageCost = 1,
+) {
   ensureMonthlyBucket(account);
   const isPro = planIsPro(account);
   const used = Number(account.usage.used || 0);
   const limit = isPro ? PRO_LIMIT : FREE_LIMIT;
+  const normalizedUsageCost = Math.max(
+    1,
+    Math.floor(Number(usageCost) || 1),
+  );
 
-  if (shouldCountUsage && used >= limit) {
+  if (shouldCountUsage && used + normalizedUsageCost > limit) {
     return {
       ok: false,
       error: "quota_reached",
@@ -571,11 +588,21 @@ function enforceQuota(account, wantsBoost, shouldCountUsage = true) {
   return { ok: true };
 }
 
-function markUsage(account, wantsBoost, shouldCountUsage = true) {
+function markUsage(
+  account,
+  wantsBoost,
+  shouldCountUsage = true,
+  usageCost = 1,
+) {
   ensureMonthlyBucket(account);
+  const normalizedUsageCost = Math.max(
+    1,
+    Math.floor(Number(usageCost) || 1),
+  );
 
   if (shouldCountUsage) {
-    account.usage.used = Number(account.usage.used || 0) + 1;
+    account.usage.used =
+      Number(account.usage.used || 0) + normalizedUsageCost;
     account.usage.lastTs = now();
   }
 
@@ -3280,6 +3307,310 @@ app.post("/api/generate", async (req, res) => {
 // --------------------
 // Quick Actions — transform current Canvas output
 // --------------------
+// --------------------
+// Mini Execution Pipeline v1
+// --------------------
+app.post("/api/pipeline", async (req, res) => {
+  const gatewayRequestId = createRequestId();
+  res.setHeader("x-gle-request-id", gatewayRequestId);
+
+  try {
+    const { userId, accountId } = getIds(req);
+
+    if (!accountId) {
+      return res.status(400).json({
+        ok: false,
+        error: "missing_account_id",
+      });
+    }
+
+    const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
+
+    const betaEmail = betaAccess.normalizeEmail(
+      acc?.email ||
+        acc?.userEmail ||
+        acc?.accountEmail ||
+        req.user?.email ||
+        "",
+    );
+
+    if (!betaAccess.isAllowed({ email: betaEmail, accountId, userId })) {
+      return betaAccessDeniedResponse(req, res);
+    }
+
+    if (!planIsPro(acc)) {
+      return res.status(403).json({
+        ok: false,
+        error: "pipeline_requires_pro",
+        message:
+          "Mini Execution Pipelines sind nur im PRO-Plan verfügbar. / Mini Execution Pipelines are available in the PRO plan only.",
+      });
+    }
+
+    const validated = validatePipelineInput(req.body);
+    const steps = getPipelineSteps(validated.template);
+    const usageCost = getPipelineUsageCost(validated.template);
+    const activeProfile = resolveGenerationProfile(acc, req.body);
+
+    ensureMonthlyBucket(acc);
+    const byokKey = getApiKey(req);
+    const isPro = planIsPro(acc);
+
+    if (BYOK_ONLY && !byokKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "byok_required",
+        message: "BYOK_ONLY is enabled. Please provide x-gle-api-key.",
+      });
+    }
+
+    if (!byokKey && !SERVER_AI_CONFIGURED) {
+      return res.status(400).json({
+        ok: false,
+        error: "missing_api_key",
+        message:
+          "Kein Server-API-Key verfügbar. Bitte später erneut versuchen oder eigenen OpenAI API-Key eintragen.",
+      });
+    }
+
+    const mode = byokKey ? "BYOK" : "PRO_SERVER";
+    const engineLabel = byokKey ? ENGINE_BYOK : ENGINE_PRO;
+
+    res.setHeader("x-gle-engine", engineLabel);
+    res.setHeader("x-gle-model", engineLabel);
+    res.setHeader("x-gle-pipeline", EXECUTION_PIPELINE_VERSION);
+    res.setHeader("x-gle-anti-fluff", ANTI_FLUFF_VERSION);
+
+    const shouldCountUsage = !byokKey;
+    const quota = enforceQuota(
+      acc,
+      false,
+      shouldCountUsage,
+      usageCost,
+    );
+
+    if (!quota.ok) {
+      return res.status(429).json({
+        ok: false,
+        error: quota.error,
+        message:
+          validated.outLang === "en"
+            ? "Your remaining monthly quota is not sufficient for this Content Pack."
+            : "Dein verbleibendes Monatskontingent reicht für dieses Content Pack nicht aus.",
+        used: Number(acc.usage.used || 0),
+        limit: PRO_LIMIT,
+        usageCost,
+        renewAt: computeRenewAt(acc),
+      });
+    }
+
+    const gatewayAlias = byokKey ? null : GLE_PRO_ALIAS;
+    const modelToUse = isPro ? MODEL_PRO : MODEL_BYOK;
+    const gatewayExecutions = [];
+    let pipelineCallIndex = 0;
+
+    async function callPipelineModel({
+      prompt,
+      temperature,
+      stage,
+      step,
+    }) {
+      pipelineCallIndex += 1;
+
+      const result = await aiGateway.generate({
+        requestId: gatewayRequestId,
+        stage:
+          stage ||
+          `pipeline_${String(step?.id || "step")}_${pipelineCallIndex}`,
+        ...(byokKey
+          ? {
+              provider: "openai",
+              model: modelToUse,
+              apiKeyOverride: byokKey,
+            }
+          : { alias: gatewayAlias }),
+        prompt,
+        temperature,
+        metadata: {
+          route: "/api/pipeline",
+          mode,
+          template: validated.template,
+          stepId: step?.id || null,
+          useCase: String(step?.useCase || "").slice(0, 80),
+          contextProfileId: activeProfile?.id || null,
+          contextProfileVersion: activeProfile
+            ? Number(activeProfile.version || 1)
+            : null,
+          proofFactsCount: activeProfile?.proofFacts?.length || 0,
+        },
+      });
+
+      gatewayExecutions.push(result.execution);
+
+      if (gatewayExecutions.length === 1) {
+        res.setHeader("x-gle-provider", result.execution.provider);
+      }
+
+      return result.output;
+    }
+
+    const outputs = [];
+
+    for (const step of steps) {
+      const groundingPromptBlock = buildGroundingPromptBlock({
+        profile: activeProfile,
+        useCase: step.useCase,
+        outLang: validated.outLang,
+      });
+
+      const stepExtra = buildPipelineStepExtra({
+        step,
+        extra: validated.extra,
+        outLang: validated.outLang,
+      });
+
+      const prompt = `${buildMasterPrompt({
+        useCase: step.useCase,
+        tone: validated.tone,
+        topic: validated.topic,
+        extra: stepExtra,
+        outLang: validated.outLang,
+      })}
+
+${groundingPromptBlock}`.trim();
+
+      let output = await callPipelineModel({
+        prompt,
+        temperature: activeProfile ? 0.35 : 0.6,
+        stage: `pipeline_${step.id}`,
+        step,
+      });
+
+      if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
+        for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
+          const hits = findStemViolations(output);
+          if (!hits.length) break;
+
+          const repairPrompt = buildRepairPrompt({
+            badOutput: output,
+            hits,
+            useCase: step.useCase,
+            tone: validated.tone,
+            topic: validated.topic,
+            extra: `${stepExtra}
+
+${groundingPromptBlock}`.trim(),
+            outLang: validated.outLang,
+          });
+
+          output = await callPipelineModel({
+            prompt: repairPrompt,
+            temperature: 0.0,
+            stage: `pipeline_${step.id}_bouncer_${i + 1}`,
+            step,
+          });
+        }
+      }
+
+      output = hardStripHotStems(output);
+
+      output = String(output || "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+        .replace(/\blink\s+in\s+bio\b/gi, "")
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/\s+([,.;:!?])/g, "$1")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+      const flags = detectUseCaseFlags(step.useCase);
+
+      const socialStructureInvalid =
+        flags.isSocial &&
+        !!activeProfile &&
+        !validateSocialPost7(output);
+
+      const guardedResult = applyClaimAwareFactGuard({
+        output,
+        profile: activeProfile,
+        ...flags,
+        outLang: validated.outLang,
+        forceSafeRewrite: socialStructureInvalid,
+        forceSafeRewriteReason: "social_structure_invalid",
+      });
+
+      outputs.push({
+        id: step.id,
+        useCase: step.useCase,
+        output: repairEncodingArtifacts(guardedResult.output),
+        proof: guardedResult.proof,
+      });
+    }
+
+    markUsage(
+      acc,
+      false,
+      shouldCountUsage,
+      usageCost,
+    );
+
+    return res.json({
+      ok: true,
+      requestId: gatewayRequestId,
+      pipelineVersion: EXECUTION_PIPELINE_VERSION,
+      template: validated.template,
+      usageCost,
+      outputs,
+      grounding: {
+        profileApplied: !!activeProfile,
+        profileId: activeProfile?.id || null,
+        profileVersion: activeProfile
+          ? Number(activeProfile.version || 1)
+          : null,
+        proofFactsCount: activeProfile?.proofFacts?.length || 0,
+      },
+      mode,
+      model: engineLabel,
+      plan: "PRO",
+      used: acc.usage.used,
+      limit: PRO_LIMIT,
+      renewAt: computeRenewAt(acc),
+      cancelAt: computeCancelAt(acc),
+    });
+  } catch (e) {
+    if (e instanceof PipelineError) {
+      return res.status(Number(e.status || 400)).json({
+        ok: false,
+        error: e.code,
+        message: e.message,
+        requestId: gatewayRequestId,
+      });
+    }
+
+    if (e instanceof ProfileError) {
+      return sendProfileError(res, e);
+    }
+
+    if (e instanceof GLEGatewayError) {
+      const publicError = toPublicError(e);
+      return res.status(Number(e.status || 500)).json({
+        ...publicError,
+        requestId: gatewayRequestId,
+      });
+    }
+
+    console.error("pipeline error:", e);
+
+    return res.status(500).json({
+      ok: false,
+      error: "pipeline_failed",
+      message: e?.message || String(e),
+      requestId: gatewayRequestId,
+    });
+  }
+});
+
 app.post("/api/transform", async (req, res) => {
   const gatewayRequestId = createRequestId();
   res.setHeader("x-gle-request-id", gatewayRequestId);

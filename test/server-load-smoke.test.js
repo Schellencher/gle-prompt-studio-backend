@@ -47,6 +47,7 @@ try {
 assert.ok(routes.some((r) => r.method === "GET" && r.route === "/api/health"));
 assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/generate"));
 assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/transform"));
+assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/pipeline"));
 assert.ok(routes.some((r) => r.method === "POST" && r.route === "/api/test"));
 assert.ok(routes.some((r) => r.method === "GET" && r.route === "/api/profiles"));
 assert.ok(routes.some((r) => r.method === "GET" && r.route === "/api/profiles/:profileId"));
