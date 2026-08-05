@@ -3545,12 +3545,55 @@ ${groundingPromptBlock}`.trim(),
         forceSafeRewrite: socialStructureInvalid,
         forceSafeRewriteReason: "social_structure_invalid",
       });
+      let finalOutput = guardedResult.output;
+      let finalProof = guardedResult.proof;
+
+      if (
+        activeProfile &&
+        guardedResult.proof?.status === "SAFE_REWRITE"
+      ) {
+        const pipelineSafeOutput = buildPipelineSafeOutput({
+          step,
+          profile: activeProfile,
+          outLang: validated.outLang,
+        });
+
+        const pipelineSafeAudit = auditOutputAgainstFacts(
+          pipelineSafeOutput,
+          activeProfile,
+        );
+
+        const pipelineSafeVerified =
+          !!pipelineSafeOutput &&
+          pipelineSafeAudit.rejectedClaimCount === 0 &&
+          pipelineSafeAudit.verifiedBodyFactCount > 0;
+
+        if (pipelineSafeVerified) {
+          finalOutput = pipelineSafeOutput;
+          finalProof = {
+            ...guardedResult.proof,
+            action: `pipeline_safe_${step.id}_rewrite`,
+            finalOutputVerified: true,
+            verifiedFactCount: pipelineSafeAudit.verifiedFactCount,
+            verifiedBodyFactCount:
+              pipelineSafeAudit.verifiedBodyFactCount,
+            completeFactCoverage:
+              pipelineSafeAudit.completeFactCoverage,
+            matchedFactIds: pipelineSafeAudit.matchedFactIds,
+            pipelineSafeOutputApplied: true,
+            pipelineSafeOutputVerifiedClaimCount:
+              pipelineSafeAudit.verifiedClaimCount,
+            pipelineSafeOutputRejectedClaimCount:
+              pipelineSafeAudit.rejectedClaimCount,
+          };
+        }
+      }
 
       outputs.push({
         id: step.id,
         useCase: step.useCase,
-        output: repairEncodingArtifacts(guardedResult.output),
-        proof: guardedResult.proof,
+        output: repairEncodingArtifacts(finalOutput),
+        proof: finalProof,
       });
     }
 
