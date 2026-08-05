@@ -49,7 +49,13 @@ const {
   resolveGenerationProfile,
   buildGroundingPromptBlock,
 } = require("./src/generation-context");
-const { applyClaimAwareFactGuard } = require("./src/fact-guard");
+const {
+  applyClaimAwareFactGuard,
+  auditOutputAgainstFacts,
+} = require("./src/fact-guard");
+const {
+  buildPipelineSafeOutput,
+} = require("./src/pipeline-safe-output");
 const {
   ANTI_FLUFF_VERSION,
   getActiveBannedStems,

@@ -1,6 +1,6 @@
 "use strict";
 
-const EXECUTION_PIPELINE_VERSION = "execution-pipeline-v1.1";
+const EXECUTION_PIPELINE_VERSION = "execution-pipeline-v1.2";
 
 const PIPELINE_TEMPLATES = {
   content_pack: [
