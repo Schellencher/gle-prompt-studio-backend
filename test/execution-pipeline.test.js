@@ -9,7 +9,7 @@ const {
   buildPipelineStepExtra,
 } = require("../src/execution-pipeline");
 
-assert.equal(EXECUTION_PIPELINE_VERSION, "execution-pipeline-v1");
+assert.equal(EXECUTION_PIPELINE_VERSION, "execution-pipeline-v1.1");
 
 assert.equal(normalizePipelineTemplate("CONTENT_PACK"), "content_pack");
 assert.equal(normalizePipelineTemplate("content-pack"), "content_pack");
