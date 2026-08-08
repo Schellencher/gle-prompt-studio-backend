@@ -3828,6 +3828,328 @@ async function executeQuickActionTransform({
     noOpReason,
   };
 }
+app.post("/api/transform-pack", async (req, res) => {
+  const gatewayRequestId = createRequestId();
+  const usageCost = 3;
+
+  res.setHeader("x-gle-request-id", gatewayRequestId);
+
+  try {
+    const { userId, accountId } = getIds(req);
+
+    if (!accountId) {
+      return res.status(400).json({
+        ok: false,
+        error: "missing_account_id",
+      });
+    }
+
+    const acc = getOrCreateAccount(accountId, userId);
+    syncStripeMode(acc);
+
+    const betaEmail = betaAccess.normalizeEmail(
+      acc?.email ||
+        acc?.userEmail ||
+        acc?.accountEmail ||
+        req.user?.email ||
+        "",
+    );
+
+    if (!betaAccess.isAllowed({ email: betaEmail, accountId, userId })) {
+      return betaAccessDeniedResponse(req, res);
+    }
+
+    if (!planIsPro(acc)) {
+      return res.status(403).json({
+        ok: false,
+        error: "pro_required",
+        message:
+          "PRO Pack Sync ist nur im PRO-Plan verfügbar. / PRO Pack Sync is only available on the PRO plan.",
+      });
+    }
+
+    const packDefinitions = [
+      { id: "social", useCase: "Social Media Post" },
+      { id: "linkedin", useCase: "LinkedIn Post" },
+      { id: "email", useCase: "E-Mail" },
+    ];
+
+    const incomingOutputs = Array.isArray(req.body?.outputs)
+      ? req.body.outputs
+      : [];
+
+    if (
+      incomingOutputs.length !== packDefinitions.length ||
+      !packDefinitions.every((definition) =>
+        incomingOutputs.some((item) => item?.id === definition.id),
+      )
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_pack_outputs",
+        message:
+          "Das Content Pack muss Social, LinkedIn und E-Mail enthalten. / The Content Pack must contain Social, LinkedIn and Email.",
+      });
+    }
+
+    const validatedItems = packDefinitions.map((definition) => {
+      const source = incomingOutputs.find(
+        (item) => item?.id === definition.id,
+      );
+
+      return {
+        ...definition,
+        validated: validateQuickActionInput({
+          currentOutput: source?.output,
+          actionType: req.body?.actionType,
+        }),
+      };
+    });
+
+    const tone = String(req.body?.tone || "Professionell").trim();
+    const targetTone = String(
+      req.body?.targetTone || tone || "Professionell",
+    )
+      .trim()
+      .slice(0, 80);
+
+    const outLangRaw = String(
+      req.body?.outLang || req.body?.language || "DE",
+    )
+      .trim()
+      .toLowerCase();
+
+    const outLang = outLangRaw.startsWith("en") ? "en" : "de";
+
+    const activeProfile = resolveGenerationProfile(acc, req.body);
+
+    ensureMonthlyBucket(acc);
+
+    const byokKey = getApiKey(req);
+    const shouldCountUsage = !byokKey;
+
+    if (BYOK_ONLY && !byokKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "byok_required",
+        message: "BYOK_ONLY is enabled. Please provide x-gle-api-key.",
+      });
+    }
+
+    if (!byokKey && !SERVER_AI_CONFIGURED) {
+      return res.status(400).json({
+        ok: false,
+        error: "missing_api_key",
+        message:
+          "Kein Server-API-Key verfügbar. Bitte später erneut versuchen oder eigenen OpenAI API-Key eintragen.",
+      });
+    }
+
+    const quota = enforceQuota(
+      acc,
+      false,
+      shouldCountUsage,
+      usageCost,
+    );
+
+    if (!quota.ok) {
+      return res.status(429).json({
+        ok: false,
+        error: quota.error,
+        message:
+          outLang === "en"
+            ? "Your remaining monthly quota is not sufficient for PRO Pack Sync."
+            : "Dein verbleibendes Monatskontingent reicht für PRO Pack Sync nicht aus.",
+        used: Number(acc.usage.used || 0),
+        limit: PRO_LIMIT,
+        usageCost,
+        renewAt: computeRenewAt(acc),
+      });
+    }
+
+    const mode = byokKey ? "BYOK" : "PRO_SERVER";
+    const apiKeyToUse = byokKey || SERVER_OPENAI_KEY;
+    const modelToUse = MODEL_PRO;
+    const gatewayAlias = byokKey ? null : GLE_PRO_ALIAS;
+    const engineLabel = byokKey ? ENGINE_BYOK : ENGINE_PRO;
+
+    res.setHeader("x-gle-engine", engineLabel);
+    res.setHeader("x-gle-model", engineLabel);
+    res.setHeader("x-gle-pack-sync", "v1");
+    res.setHeader("x-gle-anti-fluff", ANTI_FLUFF_VERSION);
+    res.setHeader(
+      "x-gle-quick-action",
+      validatedItems[0].validated.actionType,
+    );
+
+    const gatewayExecutions = [];
+    let packCallIndex = 0;
+    const outputs = [];
+
+    for (const item of validatedItems) {
+      const groundingPromptBlock = buildGroundingPromptBlock({
+        profile: activeProfile,
+        useCase: item.useCase,
+        outLang,
+      });
+
+      async function callTransformModel({
+        prompt,
+        temperature,
+        stage,
+      }) {
+        packCallIndex += 1;
+
+        const result = await aiGateway.generate({
+          requestId: gatewayRequestId,
+          stage: `pack_${item.id}_${
+            stage ||
+            `quick_action_${item.validated.actionType}_${packCallIndex}`
+          }`,
+          ...(byokKey
+            ? {
+                provider: "openai",
+                model: modelToUse,
+                apiKeyOverride: apiKeyToUse,
+              }
+            : { alias: gatewayAlias }),
+          prompt,
+          temperature,
+          metadata: {
+            route: "/api/transform-pack",
+            packItemId: item.id,
+            actionType: item.validated.actionType,
+            mode,
+            useCase: item.useCase,
+            contextProfileId: activeProfile?.id || null,
+            contextProfileVersion: activeProfile
+              ? Number(activeProfile.version || 1)
+              : null,
+            proofFactsCount: activeProfile?.proofFacts?.length || 0,
+          },
+        });
+
+        gatewayExecutions.push(result.execution);
+
+        if (gatewayExecutions.length === 1) {
+          res.setHeader(
+            "x-gle-provider",
+            result.execution.provider,
+          );
+        }
+
+        return result.output;
+      }
+
+      const transformResult =
+        await executeQuickActionTransform({
+          validated: item.validated,
+          useCase: item.useCase,
+          tone,
+          targetTone,
+          outLang,
+          groundingPromptBlock,
+          activeProfile,
+          callTransformModel,
+        });
+
+      outputs.push({
+        id: item.id,
+        useCase: item.useCase,
+        output: transformResult.output,
+        proof: transformResult.proofResult,
+        transform: {
+          version: QUICK_ACTIONS_VERSION,
+          actionType: item.validated.actionType,
+          targetTone:
+            item.validated.actionType === "tone"
+              ? targetTone
+              : null,
+          changed: !!transformResult.changeAssessment.changed,
+          actionApplied: !!transformResult.actionApplied,
+          noOpReason: transformResult.changeAssessment.changed
+            ? null
+            : transformResult.noOpReason || "no_visible_change",
+          safeVariantApplied:
+            !!transformResult.safeVariantApplied,
+        },
+      });
+    }
+
+    markUsage(
+      acc,
+      false,
+      shouldCountUsage,
+      usageCost,
+    );
+
+    return res.json({
+      ok: true,
+      requestId: gatewayRequestId,
+      packTransform: {
+        version: "v1",
+        actionType: validatedItems[0].validated.actionType,
+        targetTone:
+          validatedItems[0].validated.actionType === "tone"
+            ? targetTone
+            : null,
+        changedCount: outputs.filter(
+          (item) => item.transform.changed,
+        ).length,
+        usageCost,
+      },
+      outputs,
+      grounding: {
+        mode: "light-v1",
+        profileApplied: !!activeProfile,
+        profileId: activeProfile?.id || null,
+        profileVersion: activeProfile
+          ? Number(activeProfile.version || 1)
+          : null,
+        proofFactsCount: activeProfile?.proofFacts?.length || 0,
+      },
+      mode,
+      model: engineLabel,
+      plan: "PRO",
+      used: acc.usage.used,
+      limit: PRO_LIMIT,
+      boostUsed: acc.usage.boostUsed,
+      boostLimit: PRO_BOOST_LIMIT,
+      renewAt: computeRenewAt(acc),
+      cancelAt: computeCancelAt(acc),
+    });
+  } catch (e) {
+    console.error("transform-pack error:", e);
+
+    if (e instanceof QuickActionError) {
+      return res.status(Number(e.status || 400)).json({
+        ok: false,
+        error: e.code || "quick_action_failed",
+        message: e.message,
+        requestId: gatewayRequestId,
+      });
+    }
+
+    if (e instanceof ProfileError) {
+      return sendProfileError(res, e);
+    }
+
+    if (e instanceof GLEGatewayError) {
+      const publicError = toPublicError(e);
+      return res.status(Number(e.status || 500)).json({
+        ...publicError,
+        requestId: gatewayRequestId,
+      });
+    }
+
+    return res.status(500).json({
+      ok: false,
+      error: "transform_pack_failed",
+      message: e?.message || String(e),
+      requestId: gatewayRequestId,
+    });
+  }
+});
 app.post("/api/transform", async (req, res) => {
   const gatewayRequestId = createRequestId();
   res.setHeader("x-gle-request-id", gatewayRequestId);
