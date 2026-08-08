@@ -3660,6 +3660,174 @@ ${groundingPromptBlock}`.trim(),
   }
 });
 
+async function executeQuickActionTransform({
+  validated,
+  useCase,
+  tone,
+  targetTone,
+  outLang,
+  groundingPromptBlock,
+  activeProfile,
+  callTransformModel,
+}) {
+  const prompt = buildQuickActionPrompt({
+    currentOutput: validated.currentOutput,
+    actionType: validated.actionType,
+    useCase,
+    tone,
+    targetTone,
+    outLang,
+    groundingPromptBlock,
+  });
+
+  let output = await callTransformModel({
+    prompt,
+    temperature: activeProfile ? 0.25 : 0.35,
+    stage: `quick_action_${validated.actionType}`,
+  });
+
+  if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
+    for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
+      const hits = findStemViolations(output);
+      if (!hits.length) break;
+
+      const repairPrompt = buildQuickActionRepairPrompt({
+        badOutput: output,
+        sourceOutput: validated.currentOutput,
+        actionType: validated.actionType,
+        useCase,
+        tone,
+        targetTone,
+        outLang,
+        groundingPromptBlock,
+        hits,
+        activeBannedStems: ACTIVE_BANNED_STEMS,
+      });
+
+      output = await callTransformModel({
+        prompt: repairPrompt,
+        temperature: 0.0,
+        stage: `quick_action_bouncer_${i + 1}`,
+      });
+    }
+  }
+
+  output = hardStripHotStems(output);
+  output = String(output || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
+    .replace(/\blink\s+in\s+bio\b/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const flags = detectUseCaseFlags(useCase);
+  const socialStructureInvalid =
+    flags.isSocial && !!activeProfile && !validateSocialPost7(output);
+
+  const guardedResult = applyClaimAwareFactGuard({
+    output,
+    profile: activeProfile,
+    ...flags,
+    outLang,
+    forceSafeRewrite: socialStructureInvalid,
+    forceSafeRewriteReason: "social_structure_invalid",
+  });
+
+  output = repairEncodingArtifacts(guardedResult.output);
+  let proofResult = guardedResult.proof;
+  let safeVariantApplied = false;
+
+  if (
+    activeProfile &&
+    proofResult.status === "SAFE_REWRITE" &&
+    (validated.actionType === "cta" || validated.actionType === "headline")
+  ) {
+    const safeVariant = applyActionAwareSafeVariant({
+      output,
+      actionType: validated.actionType,
+      useCase,
+      outLang,
+    });
+
+    if (normalizeVisibleText(safeVariant) !== normalizeVisibleText(output)) {
+      const variantGuard = applyClaimAwareFactGuard({
+        output: safeVariant,
+        profile: activeProfile,
+        ...flags,
+        outLang,
+      });
+
+      const verifiedVariant = repairEncodingArtifacts(variantGuard.output);
+
+      if (
+        variantGuard.proof.status === "PASSED" &&
+        normalizeVisibleText(verifiedVariant) === normalizeVisibleText(safeVariant)
+      ) {
+        output = verifiedVariant;
+        safeVariantApplied = true;
+        proofResult = {
+          ...proofResult,
+          quickActionSafeVariantApplied: true,
+          quickActionSafeVariantAction: validated.actionType,
+          finalOutputVerified: true,
+          verifiedFactCount: variantGuard.proof.verifiedFactCount,
+          verifiedBodyFactCount: variantGuard.proof.verifiedBodyFactCount,
+          matchedFactIds: variantGuard.proof.matchedFactIds,
+          safeOutputVerifiedClaimCount: variantGuard.proof.verifiedClaimCount,
+          safeOutputRejectedClaimCount: 0,
+        };
+      }
+    }
+  }
+
+  let changeAssessment = assessQuickActionChange({
+    sourceOutput: validated.currentOutput,
+    candidateOutput: output,
+    actionType: validated.actionType,
+  });
+
+  let actionApplied = changeAssessment.changed;
+  let noOpReason = changeAssessment.noOpReason;
+
+  if (proofResult.status === "SAFE_REWRITE") {
+    if (validated.actionType === "tone") {
+      actionApplied = false;
+      changeAssessment = {
+        changed: false,
+        noOpReason: "action_not_safely_applicable",
+      };
+      noOpReason = changeAssessment.noOpReason;
+    }
+
+    if (
+      (validated.actionType === "cta" || validated.actionType === "headline") &&
+      !safeVariantApplied
+    ) {
+      actionApplied = false;
+      changeAssessment = {
+        changed: false,
+        noOpReason: "action_not_safely_applicable",
+      };
+      noOpReason = changeAssessment.noOpReason;
+    }
+  }
+
+  if (!changeAssessment.changed) {
+    output = validated.currentOutput;
+    actionApplied = false;
+  }
+
+  return {
+    output,
+    proofResult,
+    safeVariantApplied,
+    changeAssessment,
+    actionApplied,
+    noOpReason,
+  };
+}
 app.post("/api/transform", async (req, res) => {
   const gatewayRequestId = createRequestId();
   res.setHeader("x-gle-request-id", gatewayRequestId);
@@ -3810,156 +3978,25 @@ app.post("/api/transform", async (req, res) => {
       return result.output;
     }
 
-    const prompt = buildQuickActionPrompt({
-      currentOutput: validated.currentOutput,
-      actionType: validated.actionType,
+    const transformResult = await executeQuickActionTransform({
+      validated,
       useCase,
       tone,
       targetTone,
       outLang,
       groundingPromptBlock,
+      activeProfile,
+      callTransformModel,
     });
 
-    let output = await callTransformModel({
-      prompt,
-      temperature: activeProfile ? 0.25 : 0.35,
-      stage: `quick_action_${validated.actionType}`,
-    });
-
-    if (BOUNCER_ENABLED && BOUNCER_MAX_PASSES > 0) {
-      for (let i = 0; i < BOUNCER_MAX_PASSES; i++) {
-        const hits = findStemViolations(output);
-        if (!hits.length) break;
-
-        const repairPrompt = buildQuickActionRepairPrompt({
-          badOutput: output,
-          sourceOutput: validated.currentOutput,
-          actionType: validated.actionType,
-          useCase,
-          tone,
-          targetTone,
-          outLang,
-          groundingPromptBlock,
-          hits,
-          activeBannedStems: ACTIVE_BANNED_STEMS,
-        });
-
-        output = await callTransformModel({
-          prompt: repairPrompt,
-          temperature: 0.0,
-          stage: `quick_action_bouncer_${i + 1}`,
-        });
-      }
-    }
-
-    output = hardStripHotStems(output);
-    output = String(output || "")
-      .replace(/\u00A0/g, " ")
-      .replace(/\blink\s+in\s+(?:der\s+|meiner\s+)?bio\b/gi, "")
-      .replace(/\blink\s+in\s+bio\b/gi, "")
-      .replace(/[ \t]{2,}/g, " ")
-      .replace(/\s+([,.;:!?])/g, "$1")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-
-    const flags = detectUseCaseFlags(useCase);
-    const socialStructureInvalid =
-      flags.isSocial && !!activeProfile && !validateSocialPost7(output);
-
-    const guardedResult = applyClaimAwareFactGuard({
+    const {
       output,
-      profile: activeProfile,
-      ...flags,
-      outLang,
-      forceSafeRewrite: socialStructureInvalid,
-      forceSafeRewriteReason: "social_structure_invalid",
-    });
-    output = repairEncodingArtifacts(guardedResult.output);
-    let proofResult = guardedResult.proof;
-    let safeVariantApplied = false;
-
-    // If Fact Guard had to rebuild the transform, CTA/headline actions get one
-    // deterministic, fact-only variant so the requested action is not silently
-    // lost behind the generic SAFE_REWRITE template. The candidate is audited
-    // again before it may replace the safe baseline.
-    if (
-      activeProfile &&
-      proofResult.status === "SAFE_REWRITE" &&
-      (validated.actionType === "cta" || validated.actionType === "headline")
-    ) {
-      const safeVariant = applyActionAwareSafeVariant({
-        output,
-        actionType: validated.actionType,
-        useCase,
-        outLang,
-      });
-
-      if (normalizeVisibleText(safeVariant) !== normalizeVisibleText(output)) {
-        const variantGuard = applyClaimAwareFactGuard({
-          output: safeVariant,
-          profile: activeProfile,
-          ...flags,
-          outLang,
-        });
-        const verifiedVariant = repairEncodingArtifacts(variantGuard.output);
-
-        if (
-          variantGuard.proof.status === "PASSED" &&
-          normalizeVisibleText(verifiedVariant) === normalizeVisibleText(safeVariant)
-        ) {
-          output = verifiedVariant;
-          safeVariantApplied = true;
-          proofResult = {
-            ...proofResult,
-            quickActionSafeVariantApplied: true,
-            quickActionSafeVariantAction: validated.actionType,
-            finalOutputVerified: true,
-            verifiedFactCount: variantGuard.proof.verifiedFactCount,
-            verifiedBodyFactCount: variantGuard.proof.verifiedBodyFactCount,
-            matchedFactIds: variantGuard.proof.matchedFactIds,
-            safeOutputVerifiedClaimCount: variantGuard.proof.verifiedClaimCount,
-            safeOutputRejectedClaimCount: 0,
-          };
-        }
-      }
-    }
-
-    let changeAssessment = assessQuickActionChange({
-      sourceOutput: validated.currentOutput,
-      candidateOutput: output,
-      actionType: validated.actionType,
-    });
-
-    let actionApplied = changeAssessment.changed;
-    let noOpReason = changeAssessment.noOpReason;
-
-    // A SAFE_REWRITE for tone cannot honestly claim that the requested target
-    // tone survived the safety rebuild. Preserve the existing Canvas text instead
-    // of showing a fake successful transformation. CTA/headline are treated the
-    // same way when their verified fact-only variant could not be produced.
-    if (proofResult.status === "SAFE_REWRITE") {
-      if (validated.actionType === "tone") {
-        actionApplied = false;
-        changeAssessment = { changed: false, noOpReason: "action_not_safely_applicable" };
-        noOpReason = changeAssessment.noOpReason;
-      }
-      if (
-        (validated.actionType === "cta" || validated.actionType === "headline") &&
-        !safeVariantApplied
-      ) {
-        actionApplied = false;
-        changeAssessment = { changed: false, noOpReason: "action_not_safely_applicable" };
-        noOpReason = changeAssessment.noOpReason;
-      }
-    }
-
-    if (!changeAssessment.changed) {
-      // No visible/meaningful action result: keep the exact Canvas text the user
-      // already had. The API still reports that a transform attempt was audited.
-      output = validated.currentOutput;
-      actionApplied = false;
-    }
-
+      proofResult,
+      safeVariantApplied,
+      changeAssessment,
+      actionApplied,
+      noOpReason,
+    } = transformResult;
     res.setHeader(
       "x-gle-proof-status",
       String(proofResult.status || "NOT_VERIFIED"),
