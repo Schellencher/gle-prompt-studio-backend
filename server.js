@@ -56,6 +56,7 @@ const {
 const {
   buildPipelineSafeOutput,
 } = require("./src/pipeline-safe-output");
+const { createProofSeal } = require("./src/proof-seal");
 const {
   ANTI_FLUFF_VERSION,
   getActiveBannedStems,
@@ -3589,11 +3590,19 @@ ${groundingPromptBlock}`.trim(),
         }
       }
 
+      const deliveredOutput = repairEncodingArtifacts(finalOutput);
+      const proofSeal = createProofSeal({
+        output: deliveredOutput,
+        useCase: step.useCase,
+        proof: finalProof,
+      });
+
       outputs.push({
         id: step.id,
         useCase: step.useCase,
-        output: repairEncodingArtifacts(finalOutput),
+        output: deliveredOutput,
         proof: finalProof,
+        proofSeal,
       });
     }
 
