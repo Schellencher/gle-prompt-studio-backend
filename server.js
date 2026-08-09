@@ -4335,6 +4335,12 @@ app.post("/api/transform", async (req, res) => {
       actionApplied,
       noOpReason,
     } = transformResult;
+
+    const proofSeal = createProofSeal({
+      output,
+      useCase,
+      proof: proofResult,
+    });
     res.setHeader(
       "x-gle-proof-status",
       String(proofResult.status || "NOT_VERIFIED"),
@@ -4367,6 +4373,7 @@ app.post("/api/transform", async (req, res) => {
         proofFactsCount: activeProfile?.proofFacts?.length || 0,
       },
       proof: proofResult,
+      proofSeal,
       mode,
       model: engineLabel,
       plan: isPro ? "PRO" : "FREE",
