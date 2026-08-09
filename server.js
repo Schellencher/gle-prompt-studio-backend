@@ -4062,11 +4062,18 @@ app.post("/api/transform-pack", async (req, res) => {
           callTransformModel,
         });
 
+      const proofSeal = createProofSeal({
+        output: transformResult.output,
+        useCase: item.useCase,
+        proof: transformResult.proofResult,
+      });
+
       outputs.push({
         id: item.id,
         useCase: item.useCase,
         output: transformResult.output,
         proof: transformResult.proofResult,
+        proofSeal,
         transform: {
           version: QUICK_ACTIONS_VERSION,
           actionType: item.validated.actionType,
